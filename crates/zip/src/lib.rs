@@ -3,7 +3,7 @@
 
 #![allow(dead_code)]
 
-use std::io::SeekFrom;
+use std::{io::SeekFrom, path::Path};
 
 use tokio::{fs::{self, File}, io::{AsyncSeekExt, AsyncReadExt}};
 
@@ -21,44 +21,30 @@ const SIGNATURE_SIZE: usize = 4;
 pub struct Archive {
     file: File,
 
-    index: usize,
-    last_read_amount: usize,
-
     file_cache: FileReaderCache,
 
-    end_header: Option<EndCentralDirHeader>,
+    end_header: EndCentralDirHeader,
 }
 
 impl Archive {
-    pub async fn open() -> Self {
+    pub async fn open(path: impl AsRef<Path>) -> Self {
         let mut this = Self {
-            file: fs::OpenOptions::new().read(true).open("./resources/Zip Test 7-Zip.zip").await.unwrap(),
-
-            index: 0,
-            last_read_amount: 0,
+            file: fs::OpenOptions::new().read(true).open(path).await.unwrap(),
 
             file_cache: FileReaderCache::default(),
-            end_header: None,
+            end_header: EndCentralDirHeader::default(),
         };
 
-        {
-            let old_pos = this.file.stream_position().await.unwrap();
-            let len = this.file.seek(SeekFrom::End(0)).await.unwrap();
-
-            // Avoid seeking a third time when we were already at the end of the
-            // stream. The branch is usually way cheaper than a seek operation.
-            if old_pos != len {
-                this.file.seek(SeekFrom::Start(old_pos)).await.unwrap();
-            }
-        }
-
         this.parse().await;
+
+        // TODO: Move out. Capacity reserve is used to tell us how many files we have for when we iterate through.
+        this.file_cache.files.reserve(this.end_header.total_record_count as usize);
 
         this
     }
 
     pub fn info(&self) -> ArchiveInfo {
-        self.end_header.as_ref().unwrap().into()
+        (&self.end_header).into()
     }
 
     pub async fn read_file(&mut self) {
@@ -73,18 +59,52 @@ impl Archive {
         // LocalFileHeader::parse(self, self.files[2].relative_offset as u64).await;
     }
 
-    //
+    pub async fn iter_files(&mut self) {
+        //
+    }
+
+    pub async fn list_files(&mut self) -> Vec<CentralDirHeader> {
+        let mut reader = ArchiveReader::init(&mut self.file).await;
+
+        self.file_cache.list_files(&mut reader).await
+    }
 
 
     async fn parse(&mut self) {
-        self.end_header = Some(EndCentralDirHeader::find(self).await);
+        let mut reader = ArchiveReader::init(&mut self.file).await;
+
+        self.end_header = EndCentralDirHeader::find(&mut reader).await;
 
         // A directory is placed at the end of a ZIP file. This identifies what files are in the ZIP and identifies where in the ZIP that file is located.
         // A ZIP file is correctly identified by the presence of an end of central directory record which is located at the end of the archive structure in order to allow the easy appending of new files.
         // The order of the file entries in the central directory need not coincide with the order of file entries in the archive.
+    }
+}
 
+
+pub struct ArchiveReader<'a> {
+    file: &'a mut File,
+
+    index: usize,
+    last_read_amount: usize,
+}
+
+impl<'a> ArchiveReader<'a> {
+    pub async fn init(file: &'a mut File) -> ArchiveReader<'a> {
         // Seek back to start.
-        self.file.seek(SeekFrom::Start(0)).await.unwrap();
+        file.seek(SeekFrom::Start(0)).await.unwrap();
+
+        Self {
+            file,
+
+            index: 0,
+            last_read_amount: 0,
+        }
+    }
+
+    async fn get_seek_position(&mut self) -> u64 {
+        // Get the stream position, add our index (overflow fix), then remove buffer size
+        self.file.stream_position().await.unwrap() + self.index as u64 - self.last_read_amount as u64
     }
 
     async fn seek_to_index(&mut self, buffer: &mut [u8; BUFFER_SIZE]) {
@@ -105,11 +125,17 @@ impl Archive {
         self.index = 0;
     }
 
+    /// Repopulate buffer with next data. read also updates seek position.
+    async fn seek_to(&mut self, value: u64) {
+        self.file.seek(SeekFrom::Start(value)).await.unwrap();
+        self.index = 0;
+    }
+
     fn skip<const COUNT: usize>(&mut self) {
         self.index += COUNT;
     }
 
-    async fn get_next_chunk<'a, const COUNT: usize>(&mut self, buffer: &'a mut [u8; BUFFER_SIZE]) -> &'a [u8] {
+    async fn get_next_chunk<'b, const COUNT: usize>(&mut self, buffer: &'b mut [u8; BUFFER_SIZE]) -> &'b [u8] {
         if self.index + COUNT >= buffer.len() {
             self.seek_to_index(buffer).await;
         }

@@ -2,7 +2,7 @@ use std::io::SeekFrom;
 
 use tokio::io::{AsyncSeekExt, AsyncReadExt};
 
-use crate::{Archive, BUFFER_SIZE, SIGNATURE_SIZE};
+use crate::{BUFFER_SIZE, SIGNATURE_SIZE, ArchiveReader};
 
 
 
@@ -11,7 +11,7 @@ pub(crate) const CENTRAL_DIR_SIZE_KNOWN: usize = 46;
 
 
 /// Documents Each File
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CentralDirHeader {
     /// Version made by
     by_version: Version,
@@ -56,36 +56,36 @@ pub struct CentralDirHeader {
 }
 
 impl CentralDirHeader {
-    pub async fn parse(archive: &mut Archive, buffer: &mut [u8; BUFFER_SIZE]) -> Self {
-        assert_eq!(&buffer[archive.index..archive.index + 4], &CENTRAL_DIR_SIG);
+    pub async fn parse(reader: &mut ArchiveReader<'_>, buffer: &mut [u8; BUFFER_SIZE]) -> Self {
+        assert_eq!(&buffer[reader.index..reader.index + 4], &CENTRAL_DIR_SIG);
 
-        archive.skip::<4>();
+        reader.skip::<4>();
 
         let mut header = Self {
-            by_version: chunk_to_version(archive.get_next_chunk::<2>(buffer).await),
-            min_version: archive.next_u16(buffer).await,
-            gp_flag: archive.next_u16(buffer).await,
-            compression: archive.next_u16(buffer).await,
-            file_last_mod_time: archive.next_u16(buffer).await,
-            file_last_mod_date: archive.next_u16(buffer).await,
-            crc_32: archive.next_u32(buffer).await,
-            compressed_size: archive.next_u32(buffer).await,
-            uncompressed_size: archive.next_u32(buffer).await,
-            file_name_length: archive.next_u16(buffer).await,
-            extra_field_length: archive.next_u16(buffer).await,
-            file_comment_length: archive.next_u16(buffer).await,
-            current_disk_number: archive.next_u16(buffer).await,
-            internal_file_attr: archive.next_u16(buffer).await,
-            external_file_attr: archive.next_u32(buffer).await,
-            relative_offset: archive.next_u32(buffer).await,
+            by_version: chunk_to_version(reader.get_next_chunk::<2>(buffer).await),
+            min_version: reader.next_u16(buffer).await,
+            gp_flag: reader.next_u16(buffer).await,
+            compression: reader.next_u16(buffer).await,
+            file_last_mod_time: reader.next_u16(buffer).await,
+            file_last_mod_date: reader.next_u16(buffer).await,
+            crc_32: reader.next_u32(buffer).await,
+            compressed_size: reader.next_u32(buffer).await,
+            uncompressed_size: reader.next_u32(buffer).await,
+            file_name_length: reader.next_u16(buffer).await,
+            extra_field_length: reader.next_u16(buffer).await,
+            file_comment_length: reader.next_u16(buffer).await,
+            current_disk_number: reader.next_u16(buffer).await,
+            internal_file_attr: reader.next_u16(buffer).await,
+            external_file_attr: reader.next_u32(buffer).await,
+            relative_offset: reader.next_u32(buffer).await,
             file_name: String::new(),
             extra_field: Vec::new(),
             file_comment: String::new(),
         };
 
-        header.file_name = String::from_utf8(archive.get_chunk_amount(buffer, header.file_name_length as usize).await).unwrap();
-        header.extra_field = archive.get_chunk_amount(buffer, header.extra_field_length as usize).await;
-        header.file_comment = String::from_utf8(archive.get_chunk_amount(buffer, header.file_comment_length as usize).await).unwrap();
+        header.file_name = String::from_utf8(reader.get_chunk_amount(buffer, header.file_name_length as usize).await).unwrap();
+        header.extra_field = reader.get_chunk_amount(buffer, header.extra_field_length as usize).await;
+        header.file_comment = String::from_utf8(reader.get_chunk_amount(buffer, header.file_comment_length as usize).await).unwrap();
 
         header
     }
@@ -96,54 +96,74 @@ impl CentralDirHeader {
 #[derive(Default)]
 pub struct FileReaderCache {
     last_seek_pos: u64,
-    files: Vec<CentralDirHeader>,
-    finished: bool
+    // Contains a capacity for how many files we should have.
+    pub(crate) files: Vec<CentralDirHeader>,
 }
 
 impl FileReaderCache {
-    pub async fn find_next(&mut self, archive: &mut Archive) -> Option<&CentralDirHeader> {
-        // TODO:
+    pub fn is_fully_cached(&self) -> bool {
+        self.files.len() == self.files.capacity()
+    }
+
+    pub async fn list_files(&mut self, reader: &mut ArchiveReader<'_>) -> Vec<CentralDirHeader> {
+        let mut items = self.files.clone();
+
+        if !self.is_fully_cached() {
+            while let Some(found) = self.find_next(reader).await {
+                items.push(found.clone());
+            }
+        }
+
+        items
+    }
+
+    pub async fn find_next(&mut self, reader: &mut ArchiveReader<'_>) -> Option<&CentralDirHeader> {
+        if self.is_fully_cached() {
+            return None;
+        }
 
         let mut buffer = [0u8; BUFFER_SIZE];
 
-        archive.file.seek(SeekFrom::Start(self.last_seek_pos)).await.unwrap();
+        // TODO: Handle better. I don't want to seek if we don't need to.
+        reader.seek_to(self.last_seek_pos).await;
 
         loop {
             // Read updates seek position
-            archive.last_read_amount = archive.file.read(&mut buffer).await.unwrap();
-            archive.index = 0;
+            reader.last_read_amount = reader.file.read(&mut buffer).await.unwrap();
+            reader.index = 0;
 
-            if let Some(at_index) = archive.find_next_signature(&buffer, CENTRAL_DIR_SIG) {
+            if let Some(at_index) = reader.find_next_signature(&buffer, CENTRAL_DIR_SIG) {
                 // Set our current index to where the signature starts.
-                archive.index = at_index;
+                reader.index = at_index;
 
                 // println!("Found Header @ {} {} {:x?}", self.file.stream_position().unwrap() as usize + self.index, self.index, &buffer[self.index..self.index + 4]);
 
-                assert_eq!(&buffer[archive.index..archive.index + 4], &CENTRAL_DIR_SIG);
+                assert_eq!(&buffer[reader.index..reader.index + 4], &CENTRAL_DIR_SIG);
 
                 // TODO: Remove.
-                if archive.index + CENTRAL_DIR_SIZE_KNOWN as usize >= buffer.len() {
-                    archive.seek_to_index(&mut buffer).await;
+                if reader.index + CENTRAL_DIR_SIZE_KNOWN as usize >= buffer.len() {
+                    reader.seek_to_index(&mut buffer).await;
                 }
 
-                let header = CentralDirHeader::parse(archive, &mut buffer).await;
+                let header = CentralDirHeader::parse(reader, &mut buffer).await;
 
                 // println!("{header:#?}");
 
                 self.files.push(header);
 
-                self.last_seek_pos = archive.file.stream_position().await.unwrap();
+                // Seek position we're at?
+                self.last_seek_pos = reader.get_seek_position().await;
 
                 return self.files.last();
             }
 
             // Nothing left to read?
-            if archive.last_read_amount < buffer.len() {
+            if reader.last_read_amount < buffer.len() {
                 break;
             }
 
             // We negate the signature size to ensure we didn't get a partial previously. We remove 1 from size to prevent (end of buffer) duplicates.
-            archive.file.seek(SeekFrom::Current(1 - SIGNATURE_SIZE as i64)).await.unwrap();
+            reader.file.seek(SeekFrom::Current(1 - SIGNATURE_SIZE as i64)).await.unwrap();
         }
 
         None
@@ -152,7 +172,7 @@ impl FileReaderCache {
 
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct Version {
     compatibility: u8,
     /// The lower byte indicates the ZIP specification version (the version of this document) supported by the software used to encode the file.
