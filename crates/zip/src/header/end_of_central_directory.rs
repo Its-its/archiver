@@ -4,7 +4,7 @@ use std::io::SeekFrom;
 
 use tokio::io::{AsyncSeekExt, AsyncReadExt};
 
-use crate::{BUFFER_SIZE, SIGNATURE_SIZE, ArchiveReader};
+use crate::{BUFFER_SIZE, SIGNATURE_SIZE, ArchiveReader, Result, Error};
 
 
 pub(crate) const END_CENTRAL_DIR_SIG: [u8; 4] = [0x50, 0x4B, 0x05, 0x06];
@@ -49,36 +49,36 @@ pub(crate) struct EndCentralDirHeader {
 }
 
 impl EndCentralDirHeader {
-    pub async fn parse(reader: &mut ArchiveReader<'_>, buffer: &mut [u8; BUFFER_SIZE]) -> Self {
+    pub async fn parse(reader: &mut ArchiveReader<'_>, buffer: &mut [u8; BUFFER_SIZE]) -> Result<Self> {
         assert_eq!(&buffer[reader.index..reader.index + 4], &END_CENTRAL_DIR_SIG);
 
         reader.skip::<4>();
 
         let mut header = EndCentralDirHeader {
-            current_disk_number: reader.next_u16(buffer).await,
-            start_disk_number: reader.next_u16(buffer).await,
-            record_count_on_curr_disk: reader.next_u16(buffer).await,
-            total_record_count: reader.next_u16(buffer).await,
-            size_of: reader.next_u32(buffer).await,
-            curr_offset: reader.next_u32(buffer).await,
-            comment_len: reader.next_u16(buffer).await,
+            current_disk_number: reader.next_u16(buffer).await?,
+            start_disk_number: reader.next_u16(buffer).await?,
+            record_count_on_curr_disk: reader.next_u16(buffer).await?,
+            total_record_count: reader.next_u16(buffer).await?,
+            size_of: reader.next_u32(buffer).await?,
+            curr_offset: reader.next_u32(buffer).await?,
+            comment_len: reader.next_u16(buffer).await?,
             comment: String::new(),
         };
 
-        header.comment = String::from_utf8(reader.get_chunk_amount(buffer, header.comment_len as usize).await).unwrap();
+        header.comment = String::from_utf8(reader.get_chunk_amount(buffer, header.comment_len as usize).await?)?;
 
-        header
+        Ok(header)
     }
 
-    pub async fn find(reader: &mut ArchiveReader<'_>) -> EndCentralDirHeader {
+    pub async fn find(reader: &mut ArchiveReader<'_>) -> Result<EndCentralDirHeader> {
         let mut buffer = [0u8; BUFFER_SIZE];
 
         // Reset back to start.
-        reader.seek_to(0).await;
+        reader.seek_to(0).await?;
 
         loop {
             // Read updates seek position
-            reader.last_read_amount = reader.file.read(&mut buffer).await.unwrap();
+            reader.last_read_amount = reader.file.read(&mut buffer).await?;
             reader.index = 0;
 
             if let Some(at_index) = reader.find_next_signature(&buffer, END_CENTRAL_DIR_SIG) {
@@ -91,14 +91,14 @@ impl EndCentralDirHeader {
 
                 // TODO: Remove.
                 if reader.index + END_CENTRAL_DIR_SIZE_KNOWN as usize >= buffer.len() {
-                    reader.seek_to_index(&mut buffer).await;
+                    reader.seek_to_index(&mut buffer).await?;
                 }
 
-                let header = Self::parse(reader, &mut buffer).await;
+                let header = Self::parse(reader, &mut buffer).await?;
 
                 // println!("{header:#?}");
 
-                return header;
+                return Ok(header);
             }
 
             // Nothing left to read?
@@ -107,10 +107,10 @@ impl EndCentralDirHeader {
             }
 
             // We negate the signature size to ensure we didn't get a partial previously. We remove 1 from size to prevent (end of buffer) duplicates.
-            reader.file.seek(SeekFrom::Current(1 - SIGNATURE_SIZE as i64)).await.unwrap();
+            reader.file.seek(SeekFrom::Current(1 - SIGNATURE_SIZE as i64)).await?;
         }
 
-        panic!("Missing End Header");
+        Err(Error::MissingEndHeader)
     }
 }
 

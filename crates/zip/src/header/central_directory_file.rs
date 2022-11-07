@@ -2,7 +2,7 @@ use std::io::SeekFrom;
 
 use tokio::io::{AsyncSeekExt, AsyncReadExt};
 
-use crate::{BUFFER_SIZE, SIGNATURE_SIZE, ArchiveReader};
+use crate::{BUFFER_SIZE, SIGNATURE_SIZE, ArchiveReader, Result};
 
 
 
@@ -56,38 +56,38 @@ pub struct CentralDirHeader {
 }
 
 impl CentralDirHeader {
-    pub async fn parse(reader: &mut ArchiveReader<'_>, buffer: &mut [u8; BUFFER_SIZE]) -> Self {
+    pub async fn parse(reader: &mut ArchiveReader<'_>, buffer: &mut [u8; BUFFER_SIZE]) -> Result<Self> {
         assert_eq!(&buffer[reader.index..reader.index + 4], &CENTRAL_DIR_SIG);
 
         reader.skip::<4>();
 
         let mut header = Self {
-            by_version: chunk_to_version(reader.get_next_chunk::<2>(buffer).await),
-            min_version: reader.next_u16(buffer).await,
-            gp_flag: reader.next_u16(buffer).await,
-            compression: reader.next_u16(buffer).await,
-            file_last_mod_time: reader.next_u16(buffer).await,
-            file_last_mod_date: reader.next_u16(buffer).await,
-            crc_32: reader.next_u32(buffer).await,
-            compressed_size: reader.next_u32(buffer).await,
-            uncompressed_size: reader.next_u32(buffer).await,
-            file_name_length: reader.next_u16(buffer).await,
-            extra_field_length: reader.next_u16(buffer).await,
-            file_comment_length: reader.next_u16(buffer).await,
-            current_disk_number: reader.next_u16(buffer).await,
-            internal_file_attr: reader.next_u16(buffer).await,
-            external_file_attr: reader.next_u32(buffer).await,
-            relative_offset: reader.next_u32(buffer).await,
+            by_version: chunk_to_version(reader.get_next_chunk::<2>(buffer).await?),
+            min_version: reader.next_u16(buffer).await?,
+            gp_flag: reader.next_u16(buffer).await?,
+            compression: reader.next_u16(buffer).await?,
+            file_last_mod_time: reader.next_u16(buffer).await?,
+            file_last_mod_date: reader.next_u16(buffer).await?,
+            crc_32: reader.next_u32(buffer).await?,
+            compressed_size: reader.next_u32(buffer).await?,
+            uncompressed_size: reader.next_u32(buffer).await?,
+            file_name_length: reader.next_u16(buffer).await?,
+            extra_field_length: reader.next_u16(buffer).await?,
+            file_comment_length: reader.next_u16(buffer).await?,
+            current_disk_number: reader.next_u16(buffer).await?,
+            internal_file_attr: reader.next_u16(buffer).await?,
+            external_file_attr: reader.next_u32(buffer).await?,
+            relative_offset: reader.next_u32(buffer).await?,
             file_name: String::new(),
             extra_field: Vec::new(),
             file_comment: String::new(),
         };
 
-        header.file_name = String::from_utf8(reader.get_chunk_amount(buffer, header.file_name_length as usize).await).unwrap();
-        header.extra_field = reader.get_chunk_amount(buffer, header.extra_field_length as usize).await;
-        header.file_comment = String::from_utf8(reader.get_chunk_amount(buffer, header.file_comment_length as usize).await).unwrap();
+        header.file_name = String::from_utf8(reader.get_chunk_amount(buffer, header.file_name_length as usize).await?)?;
+        header.extra_field = reader.get_chunk_amount(buffer, header.extra_field_length as usize).await?;
+        header.file_comment = String::from_utf8(reader.get_chunk_amount(buffer, header.file_comment_length as usize).await?)?;
 
-        header
+        Ok(header)
     }
 }
 
@@ -105,31 +105,31 @@ impl FileReaderCache {
         self.files.len() == self.files.capacity()
     }
 
-    pub async fn list_files(&mut self, reader: &mut ArchiveReader<'_>) -> Vec<CentralDirHeader> {
+    pub async fn list_files(&mut self, reader: &mut ArchiveReader<'_>) -> Result<Vec<CentralDirHeader>> {
         let mut items = self.files.clone();
 
         if !self.is_fully_cached() {
-            while let Some(found) = self.find_next(reader).await {
+            while let Some(found) = self.find_next(reader).await? {
                 items.push(found.clone());
             }
         }
 
-        items
+        Ok(items)
     }
 
-    pub async fn find_next(&mut self, reader: &mut ArchiveReader<'_>) -> Option<&CentralDirHeader> {
+    pub async fn find_next(&mut self, reader: &mut ArchiveReader<'_>) -> Result<Option<&CentralDirHeader>> {
         if self.is_fully_cached() {
-            return None;
+            return Ok(None);
         }
 
         let mut buffer = [0u8; BUFFER_SIZE];
 
         // TODO: Handle better. I don't want to seek if we don't need to.
-        reader.seek_to(self.last_seek_pos).await;
+        reader.seek_to(self.last_seek_pos).await?;
 
         loop {
             // Read updates seek position
-            reader.last_read_amount = reader.file.read(&mut buffer).await.unwrap();
+            reader.last_read_amount = reader.file.read(&mut buffer).await?;
             reader.index = 0;
 
             if let Some(at_index) = reader.find_next_signature(&buffer, CENTRAL_DIR_SIG) {
@@ -142,19 +142,19 @@ impl FileReaderCache {
 
                 // TODO: Remove.
                 if reader.index + CENTRAL_DIR_SIZE_KNOWN as usize >= buffer.len() {
-                    reader.seek_to_index(&mut buffer).await;
+                    reader.seek_to_index(&mut buffer).await?;
                 }
 
-                let header = CentralDirHeader::parse(reader, &mut buffer).await;
+                let header = CentralDirHeader::parse(reader, &mut buffer).await?;
 
                 // println!("{header:#?}");
 
                 self.files.push(header);
 
                 // Seek position we're at?
-                self.last_seek_pos = reader.get_seek_position().await;
+                self.last_seek_pos = reader.get_seek_position().await?;
 
-                return self.files.last();
+                return Ok(self.files.last());
             }
 
             // Nothing left to read?
@@ -163,10 +163,10 @@ impl FileReaderCache {
             }
 
             // We negate the signature size to ensure we didn't get a partial previously. We remove 1 from size to prevent (end of buffer) duplicates.
-            reader.file.seek(SeekFrom::Current(1 - SIGNATURE_SIZE as i64)).await.unwrap();
+            reader.file.seek(SeekFrom::Current(1 - SIGNATURE_SIZE as i64)).await?;
         }
 
-        None
+        Ok(None)
     }
 }
 

@@ -1,6 +1,6 @@
 use tokio::io::AsyncReadExt;
 
-use crate::{BUFFER_SIZE, ArchiveReader};
+use crate::{BUFFER_SIZE, ArchiveReader, Result};
 
 
 
@@ -36,12 +36,12 @@ pub struct LocalFileHeader {
 }
 
 impl LocalFileHeader {
-    pub async fn parse(reader: &mut ArchiveReader<'_>, start_offset: u64) {
+    pub async fn parse(reader: &mut ArchiveReader<'_>, start_offset: u64) -> Result<()> {
         let mut buffer = [0u8; BUFFER_SIZE];
 
-        reader.seek_to(start_offset).await;
+        reader.seek_to(start_offset).await?;
 
-        reader.last_read_amount = reader.file.read(&mut buffer).await.unwrap();
+        reader.last_read_amount = reader.file.read(&mut buffer).await?;
         reader.index = 0;
 
         assert_eq!(&buffer[reader.index..reader.index + 4], &LOCAL_FILE_HEADER_SIG);
@@ -49,26 +49,28 @@ impl LocalFileHeader {
         reader.skip::<4>();
 
         let mut header = LocalFileHeader {
-            min_version: reader.next_u16(&mut buffer).await,
-            gp_flag: reader.next_u16(&mut buffer).await,
-            compression: reader.next_u16(&mut buffer).await,
-            file_last_mod_time: reader.next_u16(&mut buffer).await,
-            file_last_mod_date: reader.next_u16(&mut buffer).await,
-            crc_32: reader.next_u32(&mut buffer).await,
-            compressed_size: reader.next_u32(&mut buffer).await,
-            uncompressed_size: reader.next_u32(&mut buffer).await,
-            file_name_length: reader.next_u16(&mut buffer).await,
-            extra_field_length: reader.next_u16(&mut buffer).await,
+            min_version: reader.next_u16(&mut buffer).await?,
+            gp_flag: reader.next_u16(&mut buffer).await?,
+            compression: reader.next_u16(&mut buffer).await?,
+            file_last_mod_time: reader.next_u16(&mut buffer).await?,
+            file_last_mod_date: reader.next_u16(&mut buffer).await?,
+            crc_32: reader.next_u32(&mut buffer).await?,
+            compressed_size: reader.next_u32(&mut buffer).await?,
+            uncompressed_size: reader.next_u32(&mut buffer).await?,
+            file_name_length: reader.next_u16(&mut buffer).await?,
+            extra_field_length: reader.next_u16(&mut buffer).await?,
             file_name: String::new(),
             extra_field: Vec::new(),
         };
 
-        header.file_name = String::from_utf8(reader.get_chunk_amount(&mut buffer, header.file_name_length as usize).await).unwrap();
-        header.extra_field = reader.get_chunk_amount(&mut buffer, header.extra_field_length as usize).await;
+        header.file_name = String::from_utf8(reader.get_chunk_amount(&mut buffer, header.file_name_length as usize).await?)?;
+        header.extra_field = reader.get_chunk_amount(&mut buffer, header.extra_field_length as usize).await?;
 
-        let contents = String::from_utf8(reader.get_chunk_amount(&mut buffer, header.compressed_size as usize).await).unwrap();
+        let contents = String::from_utf8(reader.get_chunk_amount(&mut buffer, header.compressed_size as usize).await?)?;
 
         println!("{header:#?}");
         println!("{contents}");
+
+        Ok(())
     }
 }
