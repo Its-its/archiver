@@ -108,6 +108,18 @@ impl CompressionType {
                 s
             }
 
+            Self::Deflate64 => {
+                let mut decoder = DeflateDecoder::new_with_buf(
+                    Cursor::new(value),
+                    vec![0; 64 * 1024]
+                );
+
+                let mut s = String::new();
+                decoder.read_to_string(&mut s)?;
+
+                s
+            }
+
             v => unimplemented!("Compression Type: {v:?}")
         };
 
