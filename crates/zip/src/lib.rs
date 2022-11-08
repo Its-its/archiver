@@ -171,7 +171,7 @@ impl<'a> ArchiveReader<'a> {
                 // println!("idx {}, size {} >= buffer {}", self.index, size, buffer.len());
                 filled.extend_from_slice(&buffer[self.index..]);
 
-                size -= filled.len();
+                size -= buffer.len() - self.index;
 
                 self.seek_next(buffer).await?;
             } else {
