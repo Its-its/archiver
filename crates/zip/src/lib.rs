@@ -1,6 +1,8 @@
 // https://en.wikipedia.org/wiki/ZIP_(file_format)#Design
 // https://pkware.cachefly.net/webdocs/APPNOTE/APPNOTE-6.3.9.TXT
 
+#![feature(iter_array_chunks)]
+
 #![allow(dead_code)]
 
 #![deny(
@@ -13,11 +15,13 @@ use std::{io::SeekFrom, path::Path};
 
 use tokio::{fs::{self, File}, io::{AsyncSeekExt, AsyncReadExt}};
 
-mod header;
+mod compression;
 mod error;
+mod header;
 
 pub(crate) use header::*;
 pub use error::*;
+pub use compression::CompressionType;
 
 /// Buffer Read Size
 const BUFFER_SIZE: usize = 1000;
@@ -64,6 +68,7 @@ impl Archive {
         // in this field is 0xFFFFFFFF, the size will be in the
         // corresponding 8 byte zip64 extended information extra field.
 
+        // let mut reader = ArchiveReader::init(&mut self.file).await?;
         // LocalFileHeader::parse(self, self.files[2].relative_offset as u64).await;
     }
 
@@ -93,6 +98,7 @@ impl Archive {
 
 
 pub struct ArchiveReader<'a> {
+    // TODO: Utilize BufReader
     file: &'a mut File,
 
     index: usize,

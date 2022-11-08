@@ -19,8 +19,8 @@ pub struct ArchiveInfo {
     pub is_multi_disk: bool,
     /// Total amount of files and folders
     pub records: u16,
-    /// Size of archive.
-    pub size: u32,
+    /// Size of Central Directory.
+    pub central_dir_size: u32,
     /// Archive Comment, if there is one.
     pub comment: String,
 }
@@ -90,7 +90,7 @@ impl EndCentralDirHeader {
                 assert_eq!(&buffer[reader.index..reader.index + 4], &END_CENTRAL_DIR_SIG);
 
                 // TODO: Remove.
-                if reader.index + END_CENTRAL_DIR_SIZE_KNOWN as usize >= buffer.len() {
+                if reader.index + END_CENTRAL_DIR_SIZE_KNOWN >= buffer.len() {
                     reader.seek_to_index(&mut buffer).await?;
                 }
 
@@ -119,7 +119,7 @@ impl From<&EndCentralDirHeader> for ArchiveInfo {
         Self {
             is_multi_disk: value.start_disk_number != value.current_disk_number,
             comment: value.comment.clone(),
-            size: value.size_of,
+            central_dir_size: value.size_of,
             records: value.total_record_count,
         }
     }

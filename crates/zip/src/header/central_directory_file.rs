@@ -2,7 +2,9 @@ use std::io::SeekFrom;
 
 use tokio::io::{AsyncSeekExt, AsyncReadExt};
 
-use crate::{BUFFER_SIZE, SIGNATURE_SIZE, ArchiveReader, Result};
+use crate::{BUFFER_SIZE, SIGNATURE_SIZE, ArchiveReader, Result, compression::CompressionType, Archive};
+
+use super::LocalFileHeader;
 
 
 
@@ -14,43 +16,45 @@ pub(crate) const CENTRAL_DIR_SIZE_KNOWN: usize = 46;
 #[derive(Debug, Clone)]
 pub struct CentralDirHeader {
     /// Version made by
-    by_version: Version,
+    pub by_version: Version,
     /// Version needed to extract (minimum)
     // TODO: Early 7.x (pre-7.2) versions of PKZIP incorrectly set the version needed to extract for BZIP2 compression to be 50 when it SHOULD have been 46.
     // TODO: When using ZIP64 extensions, the corresponding value in the zip64 end of central directory record MUST also be set. This field SHOULD be set appropriately to indicate whether Version 1 or Version 2 format is in use.
-    min_version: u16,
+    pub min_version: u16,
     /// General purpose bit flag
-    gp_flag: u16,
+    pub gp_flag: u16,
     /// Compression method
-    compression: u16,
+    pub compression: CompressionType,
     /// File last modification time
-    file_last_mod_time: u16,
+    pub file_last_mod_time: u16,
     /// File last modification date
-    file_last_mod_date: u16,
+    pub file_last_mod_date: u16,
     /// CRC-32 of uncompressed data
-    crc_32: u32,
+    pub crc_32: u32,
     /// Compressed size (or 0xffffffff for ZIP64)
-    compressed_size: u32,
+    pub compressed_size: u32,
     /// Uncompressed size (or 0xffffffff for ZIP64)
-    uncompressed_size: u32,
+    pub uncompressed_size: u32,
     /// File name length (n)
-    file_name_length: u16,
+    pub file_name_length: u16,
     /// Extra field length (m)
-    extra_field_length: u16,
+    pub extra_field_length: u16,
     /// File comment length (k)
-    file_comment_length: u16,
+    pub file_comment_length: u16,
     /// Disk number where file starts (or 0xffff for ZIP64)
-    current_disk_number: u16,
+    pub current_disk_number: u16,
     /// Internal file attributes
-    internal_file_attr: u16,
+    pub internal_file_attr: u16,
     /// External file attributes
-    external_file_attr: u32,
+    pub external_file_attr: u32,
     /// Relative offset of local file header (or 0xffffffff for ZIP64). This is the number of bytes between the start of the first disk on which the file occurs, and the start of the local file header. This allows software reading the central directory to locate the position of the file inside the ZIP file.
     pub relative_offset: u32,
     /// File name
     pub file_name: String,
-    /// Extra field
-    pub extra_field: Vec<u8>,
+    /// Used to store additional information.
+    ///
+    /// The field consists of a sequence of header and data pairs, where the header has a 2 byte identifier and a 2 byte data size field.
+    pub extra_field: Vec<(u16, u16)>,
     /// File comment
     pub file_comment: String,
 }
@@ -65,7 +69,7 @@ impl CentralDirHeader {
             by_version: chunk_to_version(reader.get_next_chunk::<2>(buffer).await?),
             min_version: reader.next_u16(buffer).await?,
             gp_flag: reader.next_u16(buffer).await?,
-            compression: reader.next_u16(buffer).await?,
+            compression: CompressionType::try_from(reader.next_u16(buffer).await?)?,
             file_last_mod_time: reader.next_u16(buffer).await?,
             file_last_mod_date: reader.next_u16(buffer).await?,
             crc_32: reader.next_u32(buffer).await?,
@@ -84,10 +88,23 @@ impl CentralDirHeader {
         };
 
         header.file_name = String::from_utf8(reader.get_chunk_amount(buffer, header.file_name_length as usize).await?)?;
-        header.extra_field = reader.get_chunk_amount(buffer, header.extra_field_length as usize).await?;
+        header.extra_field = reader.get_chunk_amount(buffer, header.extra_field_length as usize).await?
+            .into_iter()
+            .array_chunks::<4>()
+            .map(|v| (
+                (u16::from(v[0]) << 8) | u16::from(v[1]),
+                (u16::from(v[2]) << 8) | u16::from(v[3])
+            ))
+            .collect();
         header.file_comment = String::from_utf8(reader.get_chunk_amount(buffer, header.file_comment_length as usize).await?)?;
 
         Ok(header)
+    }
+
+    pub async fn read(&self, archive: &mut Archive) -> Result<String> {
+        let mut reader = ArchiveReader::init(&mut archive.file).await?;
+
+        Ok(LocalFileHeader::parse(&mut reader, self.relative_offset as u64).await?.1)
     }
 }
 
@@ -141,7 +158,7 @@ impl FileReaderCache {
                 assert_eq!(&buffer[reader.index..reader.index + 4], &CENTRAL_DIR_SIG);
 
                 // TODO: Remove.
-                if reader.index + CENTRAL_DIR_SIZE_KNOWN as usize >= buffer.len() {
+                if reader.index + CENTRAL_DIR_SIZE_KNOWN >= buffer.len() {
                     reader.seek_to_index(&mut buffer).await?;
                 }
 
@@ -170,16 +187,14 @@ impl FileReaderCache {
     }
 }
 
-
-
 #[derive(Debug, Clone, Copy)]
-struct Version {
-    compatibility: u8,
+pub struct Version {
+    pub compatibility: u8,
     /// The lower byte indicates the ZIP specification version (the version of this document) supported by the software used to encode the file.
     /// The value/10 indicates the major version number,
-    major: u8,
+    pub major: u8,
     /// and the value mod 10 is the minor version number.
-    minor: u8,
+    pub minor: u8,
 }
 
 impl Version {
@@ -192,10 +207,133 @@ impl Version {
     }
 }
 
-
 fn chunk_to_version(buffer: &[u8]) -> Version {
     Version::from_bytes(buffer[1], buffer[0])
 }
+
+// 4.4.2 version made by (2 bytes)
+//     4.4.2.1 The upper byte indicates the compatibility of the file
+//     attribute information.  If the external file attributes
+//     are compatible with MS-DOS and can be read by PKZIP for
+//     DOS version 2.04g then this value will be zero.  If these
+//     attributes are not compatible, then this value will
+//     identify the host system on which the attributes are
+//     compatible.  Software can use this information to determine
+//     the line record format for text files etc.
+//
+//     4.4.2.2 The current mappings are:
+//         0 - MS-DOS and OS/2 (FAT / VFAT / FAT32 file systems)
+//         1 - Amiga                     2 - OpenVMS
+//         3 - UNIX                      4 - VM/CMS
+//         5 - Atari ST                  6 - OS/2 H.P.F.S.
+//         7 - Macintosh                 8 - Z-System
+//         9 - CP/M                     10 - Windows NTFS
+//        11 - MVS (OS/390 - Z/OS)      12 - VSE
+//        13 - Acorn Risc               14 - VFAT
+//        15 - alternate MVS            16 - BeOS
+//        17 - Tandem                   18 - OS/400
+//        19 - OS X (Darwin)            20 thru 255 - unused
+//
+//     4.4.2.3 The lower byte indicates the ZIP specification version
+//     (the version of this document) supported by the software
+//     used to encode the file.  The value/10 indicates the major
+//     version number, and the value mod 10 is the minor version
+//     number.
+
+
+// 4.4.3.2 Current minimum feature versions are as defined below:
+//     1.0 - Default value
+//     1.1 - File is a volume label
+//     2.0 - File is a folder (directory)
+//     2.0 - File is compressed using Deflate compression
+//     2.0 - File is encrypted using traditional PKWARE encryption
+//     2.1 - File is compressed using Deflate64(tm)
+//     2.5 - File is compressed using PKWARE DCL Implode
+//     2.7 - File is a patch data set
+//     4.5 - File uses ZIP64 format extensions
+//     4.6 - File is compressed using BZIP2 compression*
+//     5.0 - File is encrypted using DES
+//     5.0 - File is encrypted using 3DES
+//     5.0 - File is encrypted using original RC2 encryption
+//     5.0 - File is encrypted using RC4 encryption
+//     5.1 - File is encrypted using AES encryption
+//     5.1 - File is encrypted using corrected RC2 encryption**
+//     5.2 - File is encrypted using corrected RC2-64 encryption**
+//     6.1 - File is encrypted using non-OAEP key wrapping***
+//     6.2 - Central directory encryption
+//     6.3 - File is compressed using LZMA
+//     6.3 - File is compressed using PPMd+
+//     6.3 - File is encrypted using Blowfish
+//     6.3 - File is encrypted using Twofish
+
+// 4.4.4 general purpose bit flag: (2 bytes)
+//     Bit 0: If set, indicates that the file is encrypted.
+//     (For Method 6 - Imploding)
+//     Bit 1: If the compression method used was type 6,
+//             Imploding, then this bit, if set, indicates
+//             an 8K sliding dictionary was used.  If clear,
+//             then a 4K sliding dictionary was used.
+//     Bit 2: If the compression method used was type 6,
+//             Imploding, then this bit, if set, indicates
+//             3 Shannon-Fano trees were used to encode the
+//             sliding dictionary output.  If clear, then 2
+//             Shannon-Fano trees were used.
+//     (For Methods 8 and 9 - Deflating)
+//     Bit 2  Bit 1
+//         0      0    Normal (-en) compression option was used.
+//         0      1    Maximum (-exx/-ex) compression option was used.
+//         1      0    Fast (-ef) compression option was used.
+//         1      1    Super Fast (-es) compression option was used.
+//     (For Method 14 - LZMA)
+//     Bit 1: If the compression method used was type 14,
+//             LZMA, then this bit, if set, indicates
+//             an end-of-stream (EOS) marker is used to
+//             mark the end of the compressed data stream.
+//             If clear, then an EOS marker is not present
+//             and the compressed data size must be known
+//             to extract.
+//     Note:  Bits 1 and 2 are undefined if the compression
+//             method is any other.
+//     Bit 3: If this bit is set, the fields crc-32, compressed
+//             size and uncompressed size are set to zero in the
+//             local header.  The correct values are put in the
+//             data descriptor immediately following the compressed
+//             data.  (Note: PKZIP version 2.04g for DOS only
+//             recognizes this bit for method 8 compression, newer
+//             versions of PKZIP recognize this bit for any
+//             compression method.)
+//     Bit 4: Reserved for use with method 8, for enhanced
+//             deflating.
+//     Bit 5: If this bit is set, this indicates that the file is
+//             compressed patched data.  (Note: Requires PKZIP
+//             version 2.70 or greater)
+//     Bit 6: Strong encryption.  If this bit is set, you MUST
+//             set the version needed to extract value to at least
+//             50 and you MUST also set bit 0.  If AES encryption
+//             is used, the version needed to extract value MUST
+//             be at least 51. See the section describing the Strong
+//             Encryption Specification for details.  Refer to the
+//             section in this document entitled "Incorporating PKWARE
+//             Proprietary Technology into Your Product" for more
+//             information.
+//     Bit 7: Currently unused.
+//     Bit 8: Currently unused.
+//     Bit 9: Currently unused.
+//     Bit 10: Currently unused.
+//     Bit 11: Language encoding flag (EFS).  If this bit is set,
+//             the filename and comment fields for this file
+//             MUST be encoded using UTF-8. (see APPENDIX D)
+//     Bit 12: Reserved by PKWARE for enhanced compression.
+//     Bit 13: Set when encrypting the Central Directory to indicate
+//             selected data values in the Local Header are masked to
+//             hide their actual values.  See the section describing
+//             the Strong Encryption Specification for details.  Refer
+//             to the section in this document entitled "Incorporating
+//             PKWARE Proprietary Technology into Your Product" for
+//             more information.
+//     Bit 14: Reserved by PKWARE for alternate streams.
+//     Bit 15: Reserved by PKWARE.
+
 
 
 // Tools that correctly read ZIP archives must scan for the end of central directory record signature, and then, as appropriate, the other, indicated, central directory records.

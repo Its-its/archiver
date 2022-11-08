@@ -1,4 +1,5 @@
 use thiserror::Error as ThisError;
+use num_enum::TryFromPrimitiveError;
 
 pub type Result<R, E = Error> = std::result::Result<R, E>;
 
@@ -9,6 +10,9 @@ pub enum Error {
 
     #[error("UTF-8 Error: {0:?}")]
     Utf8(#[from] std::string::FromUtf8Error),
+
+    #[error("Num Enum Error: {0:?}")]
+    NumEnum(#[from] TryFromPrimitiveError<crate::compression::CompressionType>),
 
     #[error("Missing End Header")]
     MissingEndHeader,

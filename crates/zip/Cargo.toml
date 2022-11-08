@@ -6,6 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+# Deflate, zlib, gzip
+flate2 = "1.0"
+
 futures = { workspace = true }
+num_enum = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "rt", "macros", "rt-multi-thread", "io-util"] }

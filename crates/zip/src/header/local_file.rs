@@ -1,6 +1,6 @@
 use tokio::io::AsyncReadExt;
 
-use crate::{BUFFER_SIZE, ArchiveReader, Result};
+use crate::{BUFFER_SIZE, ArchiveReader, Result, CompressionType};
 
 
 
@@ -14,7 +14,7 @@ pub struct LocalFileHeader {
     // General purpose bit flag
     gp_flag: u16,
     // Compression method; e.g. none = 0, DEFLATE = 8 (or "\0x08\0x00")
-    compression: u16,
+    compression: CompressionType,
     // File last modification time
     file_last_mod_time: u16,
     // File last modification date
@@ -32,17 +32,15 @@ pub struct LocalFileHeader {
     // File name
     pub file_name: String,
     // Extra field
-    pub extra_field: Vec<u8>,
+    pub extra_field: Vec<(u16, u16)>,
 }
 
 impl LocalFileHeader {
-    pub async fn parse(reader: &mut ArchiveReader<'_>, start_offset: u64) -> Result<()> {
+    pub async fn parse(reader: &mut ArchiveReader<'_>, start_offset: u64) -> Result<(Self, String)> {
         let mut buffer = [0u8; BUFFER_SIZE];
 
         reader.seek_to(start_offset).await?;
-
         reader.last_read_amount = reader.file.read(&mut buffer).await?;
-        reader.index = 0;
 
         assert_eq!(&buffer[reader.index..reader.index + 4], &LOCAL_FILE_HEADER_SIG);
 
@@ -51,7 +49,7 @@ impl LocalFileHeader {
         let mut header = LocalFileHeader {
             min_version: reader.next_u16(&mut buffer).await?,
             gp_flag: reader.next_u16(&mut buffer).await?,
-            compression: reader.next_u16(&mut buffer).await?,
+            compression: CompressionType::try_from(reader.next_u16(&mut buffer).await?)?,
             file_last_mod_time: reader.next_u16(&mut buffer).await?,
             file_last_mod_date: reader.next_u16(&mut buffer).await?,
             crc_32: reader.next_u32(&mut buffer).await?,
@@ -64,13 +62,20 @@ impl LocalFileHeader {
         };
 
         header.file_name = String::from_utf8(reader.get_chunk_amount(&mut buffer, header.file_name_length as usize).await?)?;
-        header.extra_field = reader.get_chunk_amount(&mut buffer, header.extra_field_length as usize).await?;
+        header.extra_field = reader.get_chunk_amount(&mut buffer, header.extra_field_length as usize).await?
+            .into_iter()
+            .array_chunks::<4>()
+            .map(|v| (
+                (u16::from(v[0]) << 8) | u16::from(v[1]),
+                (u16::from(v[2]) << 8) | u16::from(v[3])
+            ))
+            .collect();
 
-        let contents = String::from_utf8(reader.get_chunk_amount(&mut buffer, header.compressed_size as usize).await?)?;
+        let comp_contents = reader.get_chunk_amount(&mut buffer, header.compressed_size as usize).await?;
+        let contents = header.compression.decompress(comp_contents)?;
 
-        println!("{header:#?}");
-        println!("{contents}");
+        // TODO: Determine what we want to do with the Header. It's just a shrunken form of Central Directory File Header.
 
-        Ok(())
+        Ok((header, contents))
     }
 }
