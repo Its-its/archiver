@@ -14,6 +14,9 @@ pub enum Error {
     #[error("Num Enum Error: {0:?}")]
     NumEnum(#[from] TryFromPrimitiveError<crate::compression::CompressionType>),
 
+    #[error("LZMA Error: {0:?}")]
+    Lzma(#[from] lzma_rs::error::Error),
+
     #[error("Missing End Header")]
     MissingEndHeader,
 }

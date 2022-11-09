@@ -1,5 +1,6 @@
 // https://en.wikipedia.org/wiki/ZIP_(file_format)#Design
 // https://pkware.cachefly.net/webdocs/APPNOTE/APPNOTE-6.3.9.TXT
+// https://users.cs.jmu.edu/buchhofp/forensics/formats/pkzip.html
 
 #![feature(iter_array_chunks)]
 
@@ -207,5 +208,44 @@ impl<'a> ArchiveReader<'a> {
         let buf = self.get_next_chunk::<4>(buffer).await?;
 
         Ok((buf[3] as u32) << 24 | (buf[2] as u32) << 16 | (buf[1] as u32) << 8 | buf[0] as u32)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+
+    use tokio::runtime::Runtime;
+
+    use super::*;
+
+    #[test]
+    fn zip_7zip_default() -> Result<(), Error> {
+        let rt = Runtime::new()?;
+
+        rt.block_on(async {
+            let mut archive = Archive::open("./resources/Zip Test 7-Zip.zip").await?;
+
+            //
+
+            Result::<_, Error>::Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn zip_windows_default() -> Result<(), Error> {
+        let rt = Runtime::new()?;
+
+        rt.block_on(async {
+            let mut archive = Archive::open("./resources/Zip Test Windows.zip").await?;
+
+            //
+
+            Result::<_, Error>::Ok(())
+        })?;
+
+        Ok(())
     }
 }

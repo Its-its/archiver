@@ -8,6 +8,8 @@ edition = "2021"
 [dependencies]
 # Deflate, zlib, gzip
 flate2 = "1.0"
+bzip2-rs = "0.1"
+lzma-rs = "0.2"
 
 futures = { workspace = true }
 num_enum = { workspace = true }

@@ -2,7 +2,7 @@ use zip_archiver::{Archive, Result, CompressionType};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut archive = Archive::open("./resources/Zip Test 7-Zip Deflate64 Ultra.zip").await?;
+    let mut archive = Archive::open("./resources/Zip Test 7-Zip BZip2 Ultra.zip").await?;
 
     let files = archive.list_files().await?;
 

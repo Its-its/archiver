@@ -120,6 +120,23 @@ impl CompressionType {
                 s
             }
 
+            Self::Bzip2 => {
+                let mut decoder = bzip2_rs::DecoderReader::new(Cursor::new(value));
+
+                let mut s = String::new();
+                decoder.read_to_string(&mut s)?;
+
+                s
+            }
+
+            Self::Lzma => {
+                let mut cursor = Vec::new();
+
+                lzma_rs::lzma_decompress(&mut Cursor::new(value), &mut cursor)?;
+
+                String::from_utf8(cursor)?
+            }
+
             v => unimplemented!("Compression Type: {v:?}")
         };
 
