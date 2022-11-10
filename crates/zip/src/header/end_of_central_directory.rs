@@ -85,7 +85,7 @@ impl EndCentralDirHeader {
                 // Set our current index to where the signature starts.
                 reader.index = at_index;
 
-                // println!("Found End Header @ {} {} {:x?}", archive.file.stream_position().unwrap() as usize + archive.index, archive.index, &buffer[archive.index..archive.index + 4]);
+                // trace!("Found End Header @ {} {} {:x?}", archive.file.stream_position().unwrap() as usize + archive.index, archive.index, &buffer[archive.index..archive.index + 4]);
 
                 assert_eq!(&buffer[reader.index..reader.index + 4], &END_CENTRAL_DIR_SIG);
 
@@ -96,7 +96,7 @@ impl EndCentralDirHeader {
 
                 let header = Self::parse(reader, &mut buffer).await?;
 
-                // println!("{header:#?}");
+                // trace!("{header:#?}");
 
                 return Ok(header);
             }

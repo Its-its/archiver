@@ -21,6 +21,7 @@ mod header;
 
 pub(crate) use header::*;
 pub use error::*;
+use tracing::debug;
 
 
 /// Buffer Read Size
@@ -86,7 +87,7 @@ impl Archive {
 
             if let Some(at_index) = reader.find_signature(&buffer, GENERAL_DIR_SIG_5_0) {
                 // TODO: Handle Self-extracting module before signature.
-                println!("Signature Index: {}", at_index);
+                debug!("Signature Index: {}", at_index);
 
                 // Set our current index to where the signature starts.
                 reader.index = at_index;
@@ -119,8 +120,6 @@ impl Archive {
 
                 // Iterate through headers.
                 loop {
-                    println!("=============================================");
-
                     let general_header = GeneralHeader::parse(&mut reader, &mut buffer).await?;
 
                     match general_header.type_of {
@@ -131,7 +130,7 @@ impl Archive {
                                 &mut buffer
                             ).await?;
 
-                            println!("{header:#?}");
+                            debug!("{header:#?}");
 
                             main_archive = Some(header);
                         }
@@ -143,7 +142,7 @@ impl Archive {
                                 &mut buffer
                             ).await?;
 
-                            println!("{header:#?}");
+                            debug!("{header:#?}");
 
                             files.push(header);
                         }
@@ -155,7 +154,7 @@ impl Archive {
                                 &mut buffer
                             ).await?;
 
-                            println!("{header:#?}");
+                            debug!("{header:#?}");
 
 
                             end_of_archive = Some(header);
@@ -168,7 +167,7 @@ impl Archive {
                 }
 
                 if reader.index != reader.last_read_amount {
-                    println!("Extra Info after End Of Archive");
+                    debug!("Extra Info after End Of Archive");
                 }
 
                 break;

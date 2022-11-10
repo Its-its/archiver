@@ -153,7 +153,7 @@ impl FileReaderCache {
                 // Set our current index to where the signature starts.
                 reader.index = at_index;
 
-                // println!("Found Header @ {} {} {:x?}", self.file.stream_position().unwrap() as usize + self.index, self.index, &buffer[self.index..self.index + 4]);
+                // trace!("Found Header @ {} {} {:x?}", self.file.stream_position().unwrap() as usize + self.index, self.index, &buffer[self.index..self.index + 4]);
 
                 assert_eq!(&buffer[reader.index..reader.index + 4], &CENTRAL_DIR_SIG);
 
@@ -164,7 +164,7 @@ impl FileReaderCache {
 
                 let header = CentralDirHeader::parse(reader, &mut buffer).await?;
 
-                // println!("{header:#?}");
+                // trace!("{header:#?}");
 
                 self.files.push(header);
 

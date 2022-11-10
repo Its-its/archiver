@@ -7,21 +7,21 @@ async fn main() -> Result<()> {
     // let files = archive.list_files().await?;
 
     // for file in files {
-    //     println!("{}", file.file_name);
-    //     println!("  compression: {:?}", file.compression);
-    //     println!("  min_version: {}", file.min_version);
-    //     println!("  gp_flag: {}", file.gp_flag);
-    //     println!("  comp_size: {}", file.compressed_size);
-    //     println!("  uncomp_size: {}", file.uncompressed_size);
+    //     trace!("{}", file.file_name);
+    //     trace!("  compression: {:?}", file.compression);
+    //     trace!("  min_version: {}", file.min_version);
+    //     trace!("  gp_flag: {}", file.gp_flag);
+    //     trace!("  comp_size: {}", file.compressed_size);
+    //     trace!("  uncomp_size: {}", file.uncompressed_size);
 
     //     if file.compression != CompressionType::None {
     //         let contents = file.read(&mut archive).await?;
 
-    //         // println!("{contents}");
+    //         // trace!("{contents}");
     //     }
     // }
 
-    // println!("\n{:#?}", archive.info());
+    // trace!("\n{:#?}", archive.info());
 
     Ok(())
 }

@@ -175,7 +175,7 @@ impl<'a> ArchiveReader<'a> {
 
         while size != 0 {
             if self.index + size >= buffer.len() {
-                // println!("idx {}, size {} >= buffer {}", self.index, size, buffer.len());
+                // trace!("idx {}, size {} >= buffer {}", self.index, size, buffer.len());
                 filled.extend_from_slice(&buffer[self.index..]);
 
                 size -= buffer.len() - self.index;
