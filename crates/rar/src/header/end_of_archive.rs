@@ -17,7 +17,11 @@ impl EndOfArchiveHeader {
         reader: &mut ArchiveReader<'_>,
         buffer: &mut [u8; BUFFER_SIZE],
     ) -> Result<Self> {
-        let archive_flags = EndOfArchiveFlags::from_bits(reader.next_vint(buffer).await?).expect("Archive Flag");
+        let archive_flags = {
+            let value = reader.next_vint(buffer).await?;
+            EndOfArchiveFlags::from_bits(value)
+            .ok_or(crate::Error::InvalidBitFlag { name: "End Of Archive", flag: value })?
+        };
 
         Ok(Self {
             general_header,

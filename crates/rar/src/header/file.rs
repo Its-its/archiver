@@ -126,7 +126,11 @@ impl FileArchiveHeader {
         reader: &mut ArchiveReader<'_>,
         buffer: &mut [u8; BUFFER_SIZE],
     ) -> Result<Self> {
-        let file_flags = FileFlags::from_bits(reader.next_vint(buffer).await?).expect("File Flag");
+        let file_flags = {
+            let value = reader.next_vint(buffer).await?;
+            FileFlags::from_bits(value)
+            .ok_or(crate::Error::InvalidBitFlag { name: "File", flag: value })?
+        };
 
         // TODO: If flag 0x0008 is set, unpacked size field is still present, but must be ignored and extraction must be performed until reaching the end of compression stream.
         // TODO: This flag can be set if actual file size is larger than reported by OS or if file size is unknown such as for all volumes except last when archiving from stdin to multivolume archive.
@@ -148,7 +152,11 @@ impl FileArchiveHeader {
 
         let comp_info = reader.next_vint(buffer).await?;
 
-        let host_os = OperatingSystem::from_bits(reader.next_vint(buffer).await?).expect("Host OS");
+        let host_os = {
+            let value = reader.next_vint(buffer).await?;
+            OperatingSystem::from_bits(value)
+            .ok_or(crate::Error::InvalidBitFlag { name: "Operating System", flag: value })?
+        };
 
         let name_length = reader.next_vint(buffer).await?;
 

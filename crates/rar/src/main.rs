@@ -2,7 +2,7 @@ use rar_archiver::{Archive, Result};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut archive = Archive::open("./resources/RAR Test Winrar Best.rar").await?;
+    let mut archive = Archive::open("./resources/rar/RAR Test Winrar Best 128KB.rar").await?;
 
     // let files = archive.list_files().await?;
 

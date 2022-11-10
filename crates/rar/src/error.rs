@@ -14,6 +14,12 @@ pub enum Error {
     #[error("Num Enum Error: {0:?}")]
     NumEnum(#[from] TryFromPrimitiveError<crate::HeaderType>),
 
+    #[error("Invalid Bit Flag {name:?} => {flag:?}")]
+    InvalidBitFlag {
+        name: &'static str,
+        flag: u64,
+    },
+
     #[error("Missing Main Header")]
     MissingMainHeader,
 

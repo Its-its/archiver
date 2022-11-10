@@ -138,7 +138,11 @@ impl GeneralHeader {
         let size = reader.next_vint(buffer).await?;
 
         let type_of = HeaderType::try_from(reader.next_vint(buffer).await? as u8)?;
-        let flags = HeaderFlags::from_bits(reader.next_vint(buffer).await?).expect("Header Flag");
+        let flags = {
+            let value = reader.next_vint(buffer).await?;
+            HeaderFlags::from_bits(value)
+            .ok_or(crate::Error::InvalidBitFlag { name: "Header", flag: value })?
+        };
 
         let extra_area_size = if flags.contains(HeaderFlags::EXTRA_AREA) {
             reader.next_vint(buffer).await?

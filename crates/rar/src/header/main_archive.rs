@@ -23,7 +23,11 @@ impl MainArchiveHeader {
         reader: &mut ArchiveReader<'_>,
         buffer: &mut [u8; BUFFER_SIZE],
     ) -> Result<Self> {
-        let archive_flags = ArchiveFlags::from_bits(reader.next_vint(buffer).await?).expect("Archive Flag");
+        let archive_flags = {
+            let value = reader.next_vint(buffer).await?;
+            ArchiveFlags::from_bits(value)
+            .ok_or(crate::Error::InvalidBitFlag { name: "Archive", flag: value })?
+        };
 
         let volume_number = if archive_flags.contains(ArchiveFlags::VOLUME_NUMBER) {
             Some(reader.next_vint(buffer).await?)
