@@ -14,6 +14,9 @@ pub enum Error {
     #[error("Num Enum Error: {0:?}")]
     NumEnum(#[from] TryFromPrimitiveError<crate::HeaderType>),
 
-    #[error("Missing Header")]
-    MissingHeader,
+    #[error("Missing Main Header")]
+    MissingMainHeader,
+
+    #[error("Missing End Header")]
+    MissingEndHeader,
 }

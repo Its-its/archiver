@@ -23,43 +23,23 @@ pub(crate) use header::*;
 pub use error::*;
 
 
-
-// General archive layout
-//     Self-extracting module (optional)
-//     RAR 5.0 signature
-//     Archive encryption header (optional)
-//     Main archive header
-//     Archive comment service header (optional)
-
-//     File header 1
-//     Service headers (NTFS ACL, streams, etc.) for preceding file (optional).
-//     ...
-//     File header N
-//     Service headers (NTFS ACL, streams, etc.) for preceding file (optional).
-
-//     Recovery record (optional).
-//     End of archive header.
-
-
 /// Buffer Read Size
 const BUFFER_SIZE: usize = 1000;
 
 pub struct Archive {
     file: File,
+
+    pub main_archive: MainArchiveHeader,
+    // TODO: Remove. Only store if file contains less than X files. We'll store file name, size, header position instead.
+    pub files: Vec<FileArchiveHeader>,
+    pub end_of_archive: EndOfArchiveHeader,
 }
 
 impl Archive {
     pub async fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let mut this = Self {
-            file: fs::OpenOptions::new().read(true).open(path).await?,
-        };
+        let file = fs::OpenOptions::new().read(true).open(path).await?;
 
-        this.parse().await?;
-
-        // TODO: Move out. Capacity reserve is used to tell us how many files we have for when we iterate through.
-        // this.file_cache.files.reserve(this.end_header.total_record_count as usize);
-
-        Ok(this)
+        Self::parse(file).await
     }
 
     // pub fn info(&self) -> ArchiveInfo {
@@ -85,21 +65,130 @@ impl Archive {
 
     // pub async fn list_files(&mut self) -> Result<Vec<CentralDirHeader>> {
     //     let mut reader = ArchiveReader::init(&mut self.file).await?;
-    //
-    //     self.file_cache.list_files(&mut reader).await
+
+    //     self.files.list_files(&mut reader).await
     // }
 
 
-    async fn parse(&mut self) -> Result<()> {
-        let mut reader = ArchiveReader::init(&mut self.file).await?;
+    async fn parse(mut file: File) -> Result<Self> {
+        let mut reader = ArchiveReader::init(&mut file).await?;
 
-        find_signature_header(&mut reader).await?;
+        let mut buffer = [0u8; BUFFER_SIZE];
 
-        // A directory is placed at the end of a ZIP file. This identifies what files are in the ZIP and identifies where in the ZIP that file is located.
-        // A ZIP file is correctly identified by the presence of an end of central directory record which is located at the end of the archive structure in order to allow the easy appending of new files.
-        // The order of the file entries in the central directory need not coincide with the order of file entries in the archive.
+        let mut main_archive = None;
+        let mut files = Vec::new();
+        let mut end_of_archive = None;
 
-        Ok(())
+        loop {
+            // Read updates seek position
+            reader.last_read_amount = reader.file.read(&mut buffer).await?;
+            reader.index = 0;
+
+            if let Some(at_index) = reader.find_signature(&buffer, GENERAL_DIR_SIG_5_0) {
+                // TODO: Handle Self-extracting module before signature.
+                println!("Signature Index: {}", at_index);
+
+                // Set our current index to where the signature starts.
+                reader.index = at_index;
+
+                assert_eq!(&buffer[reader.index..reader.index + GENERAL_DIR_SIG_5_0.len()], &GENERAL_DIR_SIG_5_0);
+
+                // TODO: Remove.
+                if reader.index + GENERAL_DIR_SIZE_KNOWN >= buffer.len() {
+                    reader.seek_to_index(&mut buffer).await?;
+                }
+
+                // Double check.
+                assert_eq!(&buffer[reader.index..reader.index + GENERAL_DIR_SIG_5_0.len()], &GENERAL_DIR_SIG_5_0);
+
+                reader.skip::<8>();
+
+                // General archive layout
+                //     Self-extracting module (optional)
+                //     RAR 5.0 signature
+                //     Archive encryption header (optional)
+                //     Main archive header
+                //     Archive comment service header (optional)
+                //
+                //     File header #
+                //     Service headers (NTFS ACL, streams, etc.) for preceding file (optional).
+                //     ...
+                //
+                //     Recovery record (optional).
+                //     End of archive header.
+
+                // Iterate through headers.
+                loop {
+                    println!("=============================================");
+
+                    let general_header = GeneralHeader::parse(&mut reader, &mut buffer).await?;
+
+                    match general_header.type_of {
+                        HeaderType::MainArchive => {
+                            let header = MainArchiveHeader::parse(
+                                general_header,
+                                &mut reader,
+                                &mut buffer
+                            ).await?;
+
+                            println!("{header:#?}");
+
+                            main_archive = Some(header);
+                        }
+
+                        HeaderType::File => {
+                            let header = FileArchiveHeader::parse(
+                                general_header,
+                                &mut reader,
+                                &mut buffer
+                            ).await?;
+
+                            println!("{header:#?}");
+
+                            files.push(header);
+                        }
+
+                        HeaderType::EndOfArchive => {
+                            let header = EndOfArchiveHeader::parse(
+                                general_header,
+                                &mut reader,
+                                &mut buffer
+                            ).await?;
+
+                            println!("{header:#?}");
+
+
+                            end_of_archive = Some(header);
+
+                            break;
+                        }
+
+                        v => unimplemented!("{v:?}")
+                    }
+                }
+
+                if reader.index != reader.last_read_amount {
+                    println!("Extra Info after End Of Archive");
+                }
+
+                break;
+            }
+
+            // Nothing left to read?
+            if reader.last_read_amount < buffer.len() {
+                break;
+            }
+
+            // We negate the signature size to ensure we didn't get a partial previously. We remove 1 from size to prevent (end of buffer) duplicates.
+            reader.file.seek(SeekFrom::Current(1 - SIGNATURE_SIZE as i64)).await?;
+        }
+
+        Ok(Self {
+            file,
+            main_archive: main_archive.ok_or(Error::MissingMainHeader)?,
+            files,
+            end_of_archive: end_of_archive.ok_or(Error::MissingEndHeader)?,
+        })
     }
 }
 
@@ -197,7 +286,7 @@ impl<'a> ArchiveReader<'a> {
         Ok(filled)
     }
 
-    fn find_next_signature<const SIG_SIZE: usize>(&self, buffer: &[u8], signature: [u8; SIG_SIZE]) -> Option<usize> {
+    fn find_signature<const SIG_SIZE: usize>(&self, buffer: &[u8], signature: [u8; SIG_SIZE]) -> Option<usize> {
         buffer[self.index..].windows(SIG_SIZE)
             .position(|v| v == signature)
             .map(|offset| self.index + offset)
@@ -290,9 +379,9 @@ mod tests {
 
     #[test]
     fn test_is_vint_bit() {
-        assert!(is_cont_bit(0xFF));
-        assert!(!is_cont_bit(0x7F));
-        assert!(!is_cont_bit(0x00));
-        assert!(!is_cont_bit(0x01));
+        assert!(is_cont_bit(0b1111_1111));
+        assert!(!is_cont_bit(0b0111_1111));
+        assert!(!is_cont_bit(0b0000_0000));
+        assert!(!is_cont_bit(0b0000_0001));
     }
 }

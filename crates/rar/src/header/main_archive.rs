@@ -1,11 +1,11 @@
-//! Header File
+//! Main Archive
 
 use crate::{BUFFER_SIZE, ArchiveReader, Result};
 
-use super::{GeneralHeader, ArchiveFlags};
+use super::{GeneralHeader, ArchiveFlags, HeaderFlags};
 
 #[derive(Debug)]
-pub(crate) struct MainArchiveHeader {
+pub struct MainArchiveHeader {
     pub general_header: GeneralHeader,
 
     pub archive_flags: ArchiveFlags,
@@ -31,19 +31,23 @@ impl MainArchiveHeader {
             None
         };
 
-        let extra_area = if general_header.extra_area_size != 0 {
+        let extra_area = if general_header.flags.contains(HeaderFlags::EXTRA_AREA) {
             Some(reader.get_chunk_amount(buffer, general_header.extra_area_size as usize).await?)
         } else {
             None
         };
 
-        let mut header = Self {
+        Ok(Self {
             general_header,
             archive_flags,
             volume_number,
             extra_area,
-        };
-
-        Ok(header)
+        })
     }
 }
+
+
+// TODO: Extra Header
+// Type	Name	Description
+// 0x01	Locator	Contains positions of different service blocks, so they can be accessed quickly, without scanning the entire archive. This record is optional. If it is missing, it is still necessary to scan the entire archive to verify presence of service blocks.
+// 0x02	Metadata	Optional record storing archive metadata, which includes archive original name and time.

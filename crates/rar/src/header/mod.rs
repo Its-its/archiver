@@ -1,3 +1,8 @@
+use bitflags::bitflags;
+use num_enum::{TryFromPrimitive, IntoPrimitive};
+
+use crate::{ArchiveReader, BUFFER_SIZE, Result};
+
 mod archive_comment_service;
 mod archive_encryption;
 mod file;
@@ -6,19 +11,19 @@ mod main_archive;
 mod recovery;
 mod service;
 
-use std::io::SeekFrom;
-
-use bitflags::bitflags;
+pub use archive_comment_service::*;
+pub use archive_encryption::*;
+pub use file::*;
+pub use end_of_archive::*;
 pub use main_archive::*;
+pub use recovery::*;
+pub use service::*;
 
-use num_enum::{TryFromPrimitive, IntoPrimitive};
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
-use crate::{ArchiveReader, BUFFER_SIZE, Result, Error};
 
 
 /// Signature takes up 4 bytes.
-const SIGNATURE_SIZE: usize = 4;
+pub(crate) const SIGNATURE_SIZE: usize = 8;
 
 pub(crate) const GENERAL_DIR_SIG_5_0: [u8; 8] = [0x52 , 0x61 , 0x72 , 0x21 , 0x1A , 0x07 , 0x01 , 0x00];
 pub(crate) const GENERAL_DIR_SIZE_KNOWN: usize = 12;
@@ -72,10 +77,7 @@ bitflags! {
         /// Locked archive.
         const LOCKED = 0b0001_0000;
     }
-}
 
-
-bitflags! {
     /// Flags common for all headers:
     ///
     ///   0x0001   Extra area is present in the end of header.
@@ -109,78 +111,8 @@ bitflags! {
     }
 }
 
-
-
-pub(crate) async fn find_signature_header(reader: &mut ArchiveReader<'_>) -> Result<()> {
-    let mut buffer = [0u8; BUFFER_SIZE];
-
-    // Reset back to start.
-    reader.seek_to(0).await?;
-
-    loop {
-        // Read updates seek position
-        reader.last_read_amount = reader.file.read(&mut buffer).await?;
-        reader.index = 0;
-
-        if let Some(at_index) = reader.find_next_signature(&buffer, GENERAL_DIR_SIG_5_0) {
-            // Set our current index to where the signature starts.
-            reader.index = at_index;
-
-            assert_eq!(&buffer[reader.index..reader.index + GENERAL_DIR_SIG_5_0.len()], &GENERAL_DIR_SIG_5_0);
-
-            // TODO: Remove.
-            if reader.index + GENERAL_DIR_SIZE_KNOWN >= buffer.len() {
-                reader.seek_to_index(&mut buffer).await?;
-            }
-
-            // Double check.
-            assert_eq!(&buffer[reader.index..reader.index + GENERAL_DIR_SIG_5_0.len()], &GENERAL_DIR_SIG_5_0);
-
-            reader.skip::<8>();
-
-            for _ in 0..2 {
-                println!("=============================================");
-
-                let general_header = GeneralHeader::parse(reader, &mut buffer).await?;
-
-                match general_header.type_of {
-                    HeaderType::MainArchive => {
-                        let header = MainArchiveHeader::parse(
-                            general_header,
-                            reader,
-                            &mut buffer
-                        ).await?;
-
-                        println!("{header:#?}");
-                    }
-
-                    // HeaderType::File => {
-                    //     //
-                    // }
-
-                    v => unimplemented!("{v:?}")
-                }
-            }
-
-            return Ok(());
-        }
-
-        // Nothing left to read?
-        if reader.last_read_amount < buffer.len() {
-            break;
-        }
-
-        // We negate the signature size to ensure we didn't get a partial previously. We remove 1 from size to prevent (end of buffer) duplicates.
-        reader.file.seek(SeekFrom::Current(1 - SIGNATURE_SIZE as i64)).await?;
-    }
-
-    Err(Error::MissingHeader)
-}
-
-
-
 #[derive(Debug)]
-pub(crate) struct GeneralHeader {
+pub struct GeneralHeader {
     /// CRC32 of header data starting from Header size field and up to and including the optional extra area.
     pub crc32: u32,
 
@@ -194,34 +126,46 @@ pub(crate) struct GeneralHeader {
     pub flags: HeaderFlags,
 
     /// Optional field, present only if 0x0001 header flag is set.
-    pub extra_area_size: u64,
+    pub extra_area_size: u64, // TODO: Option
 
     /// Optional field, present only if 0x0002 header flag is set.
-    pub data_size: u64,
+    pub data_size: u64, // TODO: Option
 }
 
 impl GeneralHeader {
     pub async fn parse(reader: &mut ArchiveReader<'_>, buffer: &mut [u8; BUFFER_SIZE]) -> Result<Self> {
         let crc32 = reader.next_u32(buffer).await?;
         let size = reader.next_vint(buffer).await?;
+
         let type_of = HeaderType::try_from(reader.next_vint(buffer).await? as u8)?;
         let flags = HeaderFlags::from_bits(reader.next_vint(buffer).await?).expect("Header Flag");
+
+        let extra_area_size = if flags.contains(HeaderFlags::EXTRA_AREA) {
+            reader.next_vint(buffer).await?
+        } else {
+            0
+        };
+
+        let data_size = if flags.contains(HeaderFlags::DATA_AREA) {
+            reader.next_vint(buffer).await?
+        } else {
+            0
+        };
 
         Ok(Self {
             crc32,
             size,
             type_of,
             flags,
-            extra_area_size: if flags.contains(HeaderFlags::EXTRA_AREA) {
-                reader.next_vint(buffer).await?
-            } else {
-                0
-            },
-            data_size: if flags.contains(HeaderFlags::DATA_AREA) {
-                reader.next_vint(buffer).await?
-            } else {
-                0
-            },
+            extra_area_size,
+            data_size,
         })
     }
 }
+
+// TODO: Extra Area Format
+// Size  vint  Size of record data starting from Type.
+// Type  vint  Record type. Different archive blocks have different associated extra area record types.
+//             Read the concrete archive block description for details.
+//             New record types can be added in the future, so unknown record types need to be skipped without interrupting an operation.
+// Data  ...   Record dependent data. May be missing if record consists only from size and type.
