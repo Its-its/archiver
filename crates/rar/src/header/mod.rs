@@ -166,10 +166,3 @@ impl GeneralHeader {
         })
     }
 }
-
-// TODO: Extra Area Format
-// Size  vint  Size of record data starting from Type.
-// Type  vint  Record type. Different archive blocks have different associated extra area record types.
-//             Read the concrete archive block description for details.
-//             New record types can be added in the future, so unknown record types need to be skipped without interrupting an operation.
-// Data  ...   Record dependent data. May be missing if record consists only from size and type.

@@ -1,8 +1,9 @@
 //! File Archive
 
 use bitflags::bitflags;
+use tracing::error;
 
-use crate::{BUFFER_SIZE, ArchiveReader, Result};
+use crate::{BUFFER_SIZE, ArchiveReader, Result, extract_vint};
 
 use super::{GeneralHeader, HeaderFlags};
 
@@ -108,7 +109,7 @@ pub struct FileArchiveHeader {
     pub name: String,
 
     /// Optional area containing additional header fields, present only if 0x0001 header flag is set.
-    pub extra_area: Option<Vec<u8>>,
+    pub extra_area: Option<Vec<FileExtraRecord>>,
 
     /// Optional data area, present only if 0x0002 header flag is set.
     ///
@@ -163,7 +164,7 @@ impl FileArchiveHeader {
         let name = String::from_utf8(reader.get_chunk_amount(buffer, name_length as usize).await?.to_vec())?;
 
         let extra_area = if general_header.flags.contains(HeaderFlags::EXTRA_AREA) {
-            Some(reader.get_chunk_amount(buffer, general_header.extra_area_size as usize).await?)
+            Some(parse_extra_area(&reader.get_chunk_amount(buffer, general_header.extra_area_size as usize).await?)?)
         } else {
             None
         };
@@ -247,3 +248,147 @@ impl TryFrom<u64> for FileCompressionInfo {
 // 0x05  Redirection      File system redirection.
 // 0x06  Unix owner       Unix owner and group information.
 // 0x07  Service data     Service header data array.
+
+#[derive(Debug)]
+pub enum FileExtraRecord {
+    Time {
+        modification: Option<u32>,
+        creation: Option<u32>,
+        last_access: Option<u32>,
+    }
+}
+
+fn parse_extra_area(extra_area: &[u8]) -> Result<Vec<FileExtraRecord>> {
+    let mut items = Vec::new();
+    let mut index = 0;
+
+    while index < extra_area.len() {
+        let (size_of, size) = extract_vint(&extra_area[index..]);
+        index += size_of;
+
+        let (size_of, type_of) = extract_vint(&extra_area[index..]);
+        index += size_of;
+
+        let data_end_index = index + size as usize - size_of;
+
+        let data = &extra_area[index..data_end_index];
+
+        #[allow(clippy::single_match)]
+        match type_of {
+            // 0 => {}
+            // 1 => {}
+            // 2 => {}
+
+            3 => {
+                let (size_of, flag) = extract_vint(&extra_area[index..]);
+                let flags = FileTimeFlags::from_bits(flag)
+                    .ok_or(crate::Error::InvalidBitFlag { name: "File Time", flag })?;
+                index += size_of;
+
+                // 1_667_895_851
+                let mut modification = None;
+                let mut creation = None;
+                let mut last_access = None;
+
+                if flags.contains(FileTimeFlags::MODIFICATION) {
+                    if flags.contains(FileTimeFlags::FORMAT_UNIX_TIME) {
+                        modification = Some(crate::bytes_to_u32(&extra_area[index..index + 4]));
+                        index += 4;
+                    } else {
+                        let bytes = &extra_area[index..index + 8];
+                        index += 8;
+                        modification = Some(((crate::bytes_to_u64(bytes) / 10_000_000) - 11_644_473_600) as u32);
+                    }
+                }
+
+                if flags.contains(FileTimeFlags::CREATION) {
+                    if flags.contains(FileTimeFlags::FORMAT_UNIX_TIME) {
+                        creation = Some(crate::bytes_to_u32(&extra_area[index..index + 4]));
+                        index += 4;
+                    } else {
+                        let bytes = &extra_area[index..index + 8];
+                        index += 8;
+                        creation = Some(((crate::bytes_to_u64(bytes) / 10_000_000) - 11_644_473_600) as u32);
+                    }
+                }
+
+                if flags.contains(FileTimeFlags::LAST_ACCESS) {
+                    if flags.contains(FileTimeFlags::FORMAT_UNIX_TIME) {
+                        last_access = Some(crate::bytes_to_u32(&extra_area[index..index + 4]));
+                        index += 4;
+                    } else {
+                        let bytes = &extra_area[index..index + 8];
+                        index += 8;
+                        last_access = Some(((crate::bytes_to_u64(bytes) / 10_000_000) - 11_644_473_600) as u32);
+                    }
+                }
+
+                if flags.contains(FileTimeFlags::FORMAT_UNIX_TIME | FileTimeFlags::MODIFICATION | FileTimeFlags::UNIX_TIME_W_NANOSECOND) {
+                    let nano = crate::bytes_to_u32(&extra_area[index..index + 4]);
+                    index += 4;
+                    error!(?flags, nano, "Unimplemented Nanosecond Flag");
+                }
+
+                if flags.contains(FileTimeFlags::FORMAT_UNIX_TIME | FileTimeFlags::MODIFICATION | FileTimeFlags::UNIX_TIME_W_NANOSECOND) {
+                    let nano = crate::bytes_to_u32(&extra_area[index..index + 4]);
+                    index += 4;
+                    error!(?flags, nano, "Unimplemented Nanosecond Flag");
+                }
+
+                if flags.contains(FileTimeFlags::FORMAT_UNIX_TIME | FileTimeFlags::MODIFICATION | FileTimeFlags::UNIX_TIME_W_NANOSECOND) {
+                    let nano = crate::bytes_to_u32(&extra_area[index..index + 4]);
+                    // index += 4;
+                    error!(?flags, nano, "Unimplemented Nanosecond Flag");
+                }
+
+                items.push(FileExtraRecord::Time {
+                    modification,
+                    creation,
+                    last_access,
+                });
+            }
+
+            // 4 => {}
+            // 5 => {}
+            // 6 => {}
+            // 7 => {}
+
+            _ => error!(type_of, size, ?data, "Missing File Extra Area"),
+        }
+
+        index = data_end_index;
+    }
+
+    Ok(items)
+}
+
+// Size  vint  Size of record data starting from Type.
+// Type  vint  Record type. Different archive blocks have different associated extra area record types.
+//             Read the concrete archive block description for details.
+//             New record types can be added in the future, so unknown record types need to be skipped without interrupting an operation.
+// Data  ...   Record dependent data. May be missing if record consists only from size and type.
+
+
+bitflags! {
+    /// 0x0001  Time is stored in Unix time_t format if this flags is set and in Windows FILETIME format otherwise
+    ///
+    /// 0x0002  Modification time is present
+    ///
+    /// 0x0004  Creation time is present
+    ///
+    /// 0x0008  Last access time is present
+    ///
+    /// 0x0010  Unix time format with nanosecond precision
+    pub struct FileTimeFlags: u64 {
+        /// Time is stored in Unix time_t format if this flags is set and in Windows FILETIME format otherwise
+        const FORMAT_UNIX_TIME = 0b0000_0001;
+        /// Modification time is present
+        const MODIFICATION = 0b0000_0010;
+        /// Creation time is present
+        const CREATION = 0b0000_0100;
+        /// Last access time is present
+        const LAST_ACCESS = 0b0000_1000;
+        // Unix time format with nanosecond precision
+        const UNIX_TIME_W_NANOSECOND = 0b0001_0000;
+    }
+}

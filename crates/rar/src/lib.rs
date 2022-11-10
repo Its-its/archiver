@@ -331,6 +331,31 @@ impl<'a> ArchiveReader<'a> {
     }
 }
 
+pub(crate) fn bytes_to_u64(bytes: &[u8]) -> u64 {
+    assert!(bytes.len() == 8);
+
+    (bytes[7] as u64) << 56 |
+    (bytes[6] as u64) << 48 |
+    (bytes[5] as u64) << 40 |
+    (bytes[4] as u64) << 32 |
+    (bytes[3] as u64) << 24 |
+    (bytes[2] as u64) << 16 |
+    (bytes[1] as u64) << 8 |
+    bytes[0] as u64
+
+}
+
+
+pub(crate) fn bytes_to_u32(bytes: &[u8]) -> u32 {
+    assert!(bytes.len() == 4);
+
+    (bytes[3] as u32) << 24 |
+    (bytes[2] as u32) << 16 |
+    (bytes[1] as u32) << 8 |
+    bytes[0] as u32
+
+}
+
 fn extract_vint(buffer: &[u8]) -> (usize, u64) {
     let mut shift_amount: u64 = 0;
     let mut decoded_value: u64 = 0;
