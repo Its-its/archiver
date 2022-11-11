@@ -30,3 +30,6 @@ zip-archiver = { path = "crates/zip" }
 
 [[example]]
 name = "all_rar_files"
+
+[[example]]
+name = "all_zip_files"
