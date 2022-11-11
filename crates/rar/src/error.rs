@@ -11,8 +11,12 @@ pub enum Error {
     #[error("UTF-8 Error: {0:?}")]
     Utf8(#[from] std::string::FromUtf8Error),
 
+    // TODO: Join together.
     #[error("Num Enum Error: {0:?}")]
-    NumEnum(#[from] TryFromPrimitiveError<crate::HeaderType>),
+    NumEnumHeaderType(#[from] TryFromPrimitiveError<crate::HeaderType>),
+
+    #[error("Num Enum Error: {0:?}")]
+    NumEnumFileExtraRecord(#[from] TryFromPrimitiveError<crate::FileExtraRecordType>),
 
     #[error("Invalid Bit Flag {name:?} => {flag:?}")]
     InvalidBitFlag {

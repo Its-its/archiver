@@ -85,14 +85,15 @@ impl Archive {
             reader.last_read_amount = reader.file.read(&mut buffer).await?;
             reader.index = 0;
 
-            if let Some(at_index) = reader.find_signature(&buffer, GENERAL_DIR_SIG_5_0) {
+            if let Some(at_index) = reader.find_signature_pos(&buffer) {
                 // TODO: Handle Self-extracting module before signature.
-                debug!("Signature Index: {}", at_index);
 
                 // Set our current index to where the signature starts.
                 reader.index = at_index;
 
-                assert_eq!(&buffer[reader.index..reader.index + GENERAL_DIR_SIG_5_0.len()], &GENERAL_DIR_SIG_5_0);
+                let is_5_0 = buffer[reader.index..reader.index + GENERAL_DIR_SIG_5_0.len()] == GENERAL_DIR_SIG_5_0;
+
+                debug!("Signature Index: {at_index}, is 5.0 = {is_5_0}");
 
                 // TODO: Remove.
                 if reader.index + GENERAL_DIR_SIZE_KNOWN >= buffer.len() {
@@ -100,7 +101,13 @@ impl Archive {
                 }
 
                 // Double check.
-                assert_eq!(&buffer[reader.index..reader.index + GENERAL_DIR_SIG_5_0.len()], &GENERAL_DIR_SIG_5_0);
+                if is_5_0 {
+                    assert_eq!(&buffer[reader.index..reader.index + GENERAL_DIR_SIG_5_0.len()], &GENERAL_DIR_SIG_5_0);
+                } else {
+                    assert_eq!(&buffer[reader.index..reader.index + GENERAL_DIR_SIG_4_0.len()], &GENERAL_DIR_SIG_4_0);
+
+                    panic!("RAR 4.0 is Unimplemented.");
+                }
 
                 reader.skip::<8>();
 
@@ -285,9 +292,10 @@ impl<'a> ArchiveReader<'a> {
         Ok(filled)
     }
 
-    fn find_signature<const SIG_SIZE: usize>(&self, buffer: &[u8], signature: [u8; SIG_SIZE]) -> Option<usize> {
-        buffer[self.index..].windows(SIG_SIZE)
-            .position(|v| v == signature)
+    fn find_signature_pos(&self, buffer: &[u8]) -> Option<usize> {
+        buffer[self.index..].windows(GENERAL_DIR_SIG_4_0.len())
+            .zip(buffer[self.index..].windows(GENERAL_DIR_SIG_5_0.len()))
+            .position(|v| v.0 == GENERAL_DIR_SIG_4_0 || v.1 == GENERAL_DIR_SIG_5_0)
             .map(|offset| self.index + offset)
     }
 

@@ -22,16 +22,16 @@ pub use service::*;
 
 
 
-/// Signature takes up 4 bytes.
-pub(crate) const SIGNATURE_SIZE: usize = 8;
+pub(crate) const SIGNATURE_SIZE: usize = 7;
 
+/// Signature for 5.0 +
 pub(crate) const GENERAL_DIR_SIG_5_0: [u8; 8] = [0x52 , 0x61 , 0x72 , 0x21 , 0x1A , 0x07 , 0x01 , 0x00];
+/// Signature for 1.5 - 4.0
+pub(crate) const GENERAL_DIR_SIG_4_0: [u8; 7] = [0x52 , 0x61 , 0x72 , 0x21 , 0x1A , 0x07 , 0x00];
+
+// TODO: 0x52 0x45 0x7E 0x5E - Even older signature.
+
 pub(crate) const GENERAL_DIR_SIZE_KNOWN: usize = 12;
-
-
-// 5.0 + 52 61 72 21 1A 07 01 00
-// 1.5 + 52 61 72 21 1A 07 00
-
 
 /// Type of archive header. Possible values are:
 ///

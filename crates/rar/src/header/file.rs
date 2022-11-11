@@ -1,6 +1,7 @@
 //! File Archive
 
 use bitflags::bitflags;
+use num_enum::{TryFromPrimitive, IntoPrimitive};
 use tracing::error;
 
 use crate::{BUFFER_SIZE, ArchiveReader, Result, extract_vint};
@@ -118,7 +119,7 @@ pub struct FileArchiveHeader {
     /// Depending on the compression method value in Compression information can be either uncompressed (compression method 0) or compressed.
     ///
     /// We store the position of the area for referencing later.
-    pub data_area: Option<u64>,
+    pub data_position: Option<u64>,
 }
 
 impl FileArchiveHeader {
@@ -169,7 +170,7 @@ impl FileArchiveHeader {
             None
         };
 
-        let data_area = if general_header.flags.contains(HeaderFlags::DATA_AREA) {
+        let data_position = if general_header.flags.contains(HeaderFlags::DATA_AREA) {
             let data_pos = reader.get_seek_position().await?;
 
             reader.index += general_header.data_size as usize;
@@ -195,12 +196,12 @@ impl FileArchiveHeader {
             name_length,
             name,
             extra_area,
-            data_area,
+            data_position,
         })
     }
 
     pub async fn read(&self, reader: &mut ArchiveReader<'_>, buffer: &mut [u8; BUFFER_SIZE]) -> Result<String> {
-        if let Some(pos) = self.data_area {
+        if let Some(pos) = self.data_position {
             reader.seek_to(pos).await?;
 
             Ok(String::from_utf8(reader.get_chunk_amount(buffer, self.general_header.data_size as usize).await?)?)
@@ -210,6 +211,8 @@ impl FileArchiveHeader {
     }
 }
 
+
+// TODO: File Compression
 #[derive(Debug)]
 pub struct FileCompressionInfo {
     /// Lower 6 bits (0x003f mask) contain the version of compression algorithm, resulting in possible 0 - 63 values. Current version is 0.
@@ -239,15 +242,26 @@ impl TryFrom<u64> for FileCompressionInfo {
     }
 }
 
-// TODO: Extra Area Record
-// Type  Name             Description
-// 0x01  File encryption  File encryption information.
-// 0x02  File hash        File data hash.
-// 0x03  File time        High precision file time.
-// 0x04  File version     File version number.
-// 0x05  Redirection      File system redirection.
-// 0x06  Unix owner       Unix owner and group information.
-// 0x07  Service data     Service header data array.
+#[derive(Debug, Clone, Copy, TryFromPrimitive, IntoPrimitive)]
+#[repr(u8)]
+pub enum FileExtraRecordType {
+    /// File encryption information.
+    Encryption = 1,
+    /// File data hash.
+    Hash,
+    /// High precision file time.
+    Time,
+    /// File version number.
+    Version,
+    /// File system redirection.
+    Redirection,
+    /// Unix owner and group information.
+    UnixOwner,
+    /// Service header data array.
+    ServiceData,
+}
+
+
 
 #[derive(Debug)]
 pub enum FileExtraRecord {
@@ -267,6 +281,7 @@ fn parse_extra_area(extra_area: &[u8]) -> Result<Vec<FileExtraRecord>> {
         index += size_of;
 
         let (size_of, type_of) = extract_vint(&extra_area[index..]);
+        let type_of = FileExtraRecordType::try_from(type_of as u8)?;
         index += size_of;
 
         let data_end_index = index + size as usize - size_of;
@@ -279,7 +294,7 @@ fn parse_extra_area(extra_area: &[u8]) -> Result<Vec<FileExtraRecord>> {
             // 1 => {}
             // 2 => {}
 
-            3 => {
+            FileExtraRecordType::Time => {
                 let (size_of, flag) = extract_vint(&extra_area[index..]);
                 let flags = FileTimeFlags::from_bits(flag)
                     .ok_or(crate::Error::InvalidBitFlag { name: "File Time", flag })?;
@@ -353,7 +368,7 @@ fn parse_extra_area(extra_area: &[u8]) -> Result<Vec<FileExtraRecord>> {
             // 6 => {}
             // 7 => {}
 
-            _ => error!(type_of, size, ?data, "Missing File Extra Area"),
+            _ => error!(?type_of, size, ?data, "Missing File Extra Area"),
         }
 
         index = data_end_index;
