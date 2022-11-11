@@ -18,6 +18,9 @@ pub enum Error {
     #[error("Num Enum Error: {0:?}")]
     NumEnumFileExtraRecord(#[from] TryFromPrimitiveError<crate::FileExtraRecordType>),
 
+    #[error("Num Enum 4 Error: {0:?}")]
+    NumEnumHeaderType4(#[from] TryFromPrimitiveError<crate::HeaderType4_0>),
+
     #[error("Invalid Bit Flag {name:?} => {flag:?}")]
     InvalidBitFlag {
         name: &'static str,
