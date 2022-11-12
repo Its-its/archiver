@@ -1,7 +1,7 @@
 use tracing::debug;
-use zip_archiver::{Archive, Result};
 use tracing::{subscriber::set_global_default, Level};
 use tracing_subscriber::FmtSubscriber;
+use zip_archiver::{Archive, Result};
 
 #[tokio::main]
 async fn main() -> Result<()> {

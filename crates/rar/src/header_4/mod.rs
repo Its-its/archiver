@@ -1,15 +1,12 @@
 use bitflags::bitflags;
-use num_enum::{TryFromPrimitive, IntoPrimitive};
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 
-use crate::{ArchiveReader, BUFFER_SIZE, Result};
-
-
+use crate::{ArchiveReader, Result, BUFFER_SIZE};
 
 /// Signature for 1.5 - 4.0
-pub(crate) const GENERAL_DIR_SIG_4_0: [u8; 7] = [0x52 , 0x61 , 0x72 , 0x21 , 0x1A , 0x07 , 0x00];
+pub(crate) const GENERAL_DIR_SIG_4_0: [u8; 7] = [0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00];
 
 // TODO: 0x52 0x45 0x7E 0x5E - Even older signature.
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 #[repr(u8)]
@@ -25,7 +22,6 @@ pub enum HeaderType4_0 {
     SubBlock,
     Terminator,
 }
-
 
 bitflags! {
     /// 0x0001  Volume. Archive is a part of multivolume set.
@@ -110,11 +106,10 @@ impl DictionaryBits {
             0b110 => Self::Size4096,
             0b111 => Self::Directory,
 
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 }
-
 
 #[derive(Debug)]
 pub struct GeneralHeader4 {
@@ -140,7 +135,10 @@ pub struct GeneralHeader4 {
 }
 
 impl GeneralHeader4 {
-    pub async fn parse(reader: &mut ArchiveReader<'_>, buffer: &mut [u8; BUFFER_SIZE]) -> Result<Self> {
+    pub async fn parse(
+        reader: &mut ArchiveReader<'_>,
+        buffer: &mut [u8; BUFFER_SIZE],
+    ) -> Result<Self> {
         println!("crc: {:X?}", &buffer[reader.index..reader.index + 2]);
         let crc32 = reader.next_u16(buffer).await? as u32;
 
@@ -159,8 +157,10 @@ impl GeneralHeader4 {
                 None
             };
 
-            let flags = HeaderFlags::from_bits(value)
-            .ok_or(crate::Error::InvalidBitFlag { name: "Header 4", flag: value })?;
+            let flags = HeaderFlags::from_bits(value).ok_or(crate::Error::InvalidBitFlag {
+                name: "Header 4",
+                flag: value,
+            })?;
 
             (flags, dictionary)
         };
@@ -178,7 +178,10 @@ impl GeneralHeader4 {
         //     0x8000 - if set, ADD_SIZE field is present and the full block size is HEAD_SIZE+ADD_SIZE.
 
         let add_size = if flags.contains(HeaderFlags::EXTRA_AREA) {
-            println!("extra_area_size: {:X?}", &buffer[reader.index..reader.index + 8]);
+            println!(
+                "extra_area_size: {:X?}",
+                &buffer[reader.index..reader.index + 8]
+            );
             reader.next_u64(buffer).await?
         } else {
             0

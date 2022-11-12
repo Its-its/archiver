@@ -20,7 +20,6 @@
 // The word Implode is overused by PKWARE: the DCL/TERSE Implode is distinct from the old PKZIP Implode, a predecessor to Deflate.
 // The DCL Implode is undocumented partially due to its proprietary nature held by IBM, but Mark Adler has nevertheless provided a decompressor called "blast" alongside zlib.
 
-
 // 4.3.4 Compression MUST NOT be applied to a "local file header", an "encryption
 //    header", or an "end of central directory record".  Individual "central
 //    directory records" MUST NOT be compressed, but the aggregate of all central
@@ -59,10 +58,9 @@
 use std::io::{Cursor, Read};
 
 use flate2::read::DeflateDecoder;
-use num_enum::{TryFromPrimitive, IntoPrimitive};
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 use crate::Result;
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 #[repr(u16)]
@@ -109,10 +107,8 @@ impl CompressionType {
             }
 
             Self::Deflate64 => {
-                let mut decoder = DeflateDecoder::new_with_buf(
-                    Cursor::new(value),
-                    vec![0; 64 * 1024]
-                );
+                let mut decoder =
+                    DeflateDecoder::new_with_buf(Cursor::new(value), vec![0; 64 * 1024]);
 
                 let mut s = String::new();
                 decoder.read_to_string(&mut s)?;
@@ -137,7 +133,7 @@ impl CompressionType {
                 String::from_utf8(cursor)?
             }
 
-            v => unimplemented!("Compression Type: {v:?}")
+            v => unimplemented!("Compression Type: {v:?}"),
         };
 
         Ok(res)

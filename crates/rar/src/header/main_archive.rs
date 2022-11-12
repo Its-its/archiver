@@ -1,8 +1,8 @@
 //! Main Archive
 
-use crate::{BUFFER_SIZE, ArchiveReader, Result};
+use crate::{ArchiveReader, Result, BUFFER_SIZE};
 
-use super::{GeneralHeader, ArchiveFlags, HeaderFlags};
+use super::{ArchiveFlags, GeneralHeader, HeaderFlags};
 
 #[derive(Debug)]
 pub struct MainArchiveHeader {
@@ -25,8 +25,10 @@ impl MainArchiveHeader {
     ) -> Result<Self> {
         let archive_flags = {
             let value = reader.next_vint(buffer).await?;
-            ArchiveFlags::from_bits(value)
-            .ok_or(crate::Error::InvalidBitFlag { name: "Archive", flag: value })?
+            ArchiveFlags::from_bits(value).ok_or(crate::Error::InvalidBitFlag {
+                name: "Archive",
+                flag: value,
+            })?
         };
 
         let volume_number = if archive_flags.contains(ArchiveFlags::VOLUME_NUMBER) {
@@ -36,7 +38,11 @@ impl MainArchiveHeader {
         };
 
         let extra_area = if general_header.flags.contains(HeaderFlags::EXTRA_AREA) {
-            Some(reader.get_chunk_amount(buffer, general_header.extra_area_size as usize).await?)
+            Some(
+                reader
+                    .get_chunk_amount(buffer, general_header.extra_area_size as usize)
+                    .await?,
+            )
         } else {
             None
         };
@@ -49,7 +55,6 @@ impl MainArchiveHeader {
         })
     }
 }
-
 
 // TODO: Extra Header
 // Type	Name	Description

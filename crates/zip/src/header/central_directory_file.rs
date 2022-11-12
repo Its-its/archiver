@@ -1,16 +1,15 @@
-use std::{io::SeekFrom, fmt};
+use std::{fmt, io::SeekFrom};
 
-use tokio::io::{AsyncSeekExt, AsyncReadExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
-use crate::{BUFFER_SIZE, SIGNATURE_SIZE, ArchiveReader, Result, compression::CompressionType, Archive};
+use crate::{
+    compression::CompressionType, Archive, ArchiveReader, Result, BUFFER_SIZE, SIGNATURE_SIZE,
+};
 
 use super::LocalFileHeader;
 
-
-
 pub(crate) const CENTRAL_DIR_SIG: [u8; 4] = [0x50, 0x4B, 0x01, 0x02];
 pub(crate) const CENTRAL_DIR_SIZE_KNOWN: usize = 46;
-
 
 /// Documents Each File
 #[derive(Debug, Clone)]
@@ -58,7 +57,10 @@ pub struct CentralDirHeader {
 }
 
 impl CentralDirHeader {
-    pub async fn parse(reader: &mut ArchiveReader<'_>, buffer: &mut [u8; BUFFER_SIZE]) -> Result<Self> {
+    pub async fn parse(
+        reader: &mut ArchiveReader<'_>,
+        buffer: &mut [u8; BUFFER_SIZE],
+    ) -> Result<Self> {
         assert_eq!(&buffer[reader.index..reader.index + 4], &CENTRAL_DIR_SIG);
 
         reader.skip::<4>();
@@ -85,16 +87,28 @@ impl CentralDirHeader {
             file_comment: String::new(),
         };
 
-        header.file_name = String::from_utf8(reader.get_chunk_amount(buffer, header.file_name_length as usize).await?)?;
-        header.extra_field = reader.get_chunk_amount(buffer, header.extra_field_length as usize).await?
+        header.file_name = String::from_utf8(
+            reader
+                .get_chunk_amount(buffer, header.file_name_length as usize)
+                .await?,
+        )?;
+        header.extra_field = reader
+            .get_chunk_amount(buffer, header.extra_field_length as usize)
+            .await?
             .into_iter()
             .array_chunks::<4>()
-            .map(|v| (
-                (u16::from(v[0]) << 8) | u16::from(v[1]),
-                (u16::from(v[2]) << 8) | u16::from(v[3])
-            ))
+            .map(|v| {
+                (
+                    (u16::from(v[0]) << 8) | u16::from(v[1]),
+                    (u16::from(v[2]) << 8) | u16::from(v[3]),
+                )
+            })
             .collect();
-        header.file_comment = String::from_utf8(reader.get_chunk_amount(buffer, header.file_comment_length as usize).await?)?;
+        header.file_comment = String::from_utf8(
+            reader
+                .get_chunk_amount(buffer, header.file_comment_length as usize)
+                .await?,
+        )?;
 
         Ok(header)
     }
@@ -102,10 +116,13 @@ impl CentralDirHeader {
     pub async fn read(&self, archive: &mut Archive) -> Result<String> {
         let mut reader = ArchiveReader::init(&mut archive.file).await?;
 
-        Ok(LocalFileHeader::parse(&mut reader, self.relative_offset as u64).await?.1)
+        Ok(
+            LocalFileHeader::parse(&mut reader, self.relative_offset as u64)
+                .await?
+                .1,
+        )
     }
 }
-
 
 // Used so we don't have to have load all the files on initial open.
 #[derive(Default)]
@@ -120,7 +137,10 @@ impl FileReaderCache {
         self.files.len() == self.files.capacity()
     }
 
-    pub async fn list_files(&mut self, reader: &mut ArchiveReader<'_>) -> Result<Vec<CentralDirHeader>> {
+    pub async fn list_files(
+        &mut self,
+        reader: &mut ArchiveReader<'_>,
+    ) -> Result<Vec<CentralDirHeader>> {
         let mut items = self.files.clone();
 
         if !self.is_fully_cached() {
@@ -132,7 +152,10 @@ impl FileReaderCache {
         Ok(items)
     }
 
-    pub async fn find_next(&mut self, reader: &mut ArchiveReader<'_>) -> Result<Option<&CentralDirHeader>> {
+    pub async fn find_next(
+        &mut self,
+        reader: &mut ArchiveReader<'_>,
+    ) -> Result<Option<&CentralDirHeader>> {
         if self.is_fully_cached() {
             return Ok(None);
         }
@@ -178,7 +201,10 @@ impl FileReaderCache {
             }
 
             // We negate the signature size to ensure we didn't get a partial previously. We remove 1 from size to prevent (end of buffer) duplicates.
-            reader.file.seek(SeekFrom::Current(1 - SIGNATURE_SIZE as i64)).await?;
+            reader
+                .file
+                .seek(SeekFrom::Current(1 - SIGNATURE_SIZE as i64))
+                .await?;
         }
 
         Ok(None)
@@ -209,7 +235,6 @@ impl Version {
 fn chunk_to_version(buffer: &[u8]) -> Version {
     Version::from_bytes(buffer[1], buffer[0])
 }
-
 
 #[derive(Debug, Clone, Copy)]
 pub struct VersionNeeded(u16);
@@ -361,8 +386,6 @@ impl fmt::Display for VersionNeeded {
 //             more information.
 //     Bit 14: Reserved by PKWARE for alternate streams.
 //     Bit 15: Reserved by PKWARE.
-
-
 
 // Tools that correctly read ZIP archives must scan for the end of central directory record signature, and then, as appropriate, the other, indicated, central directory records.
 

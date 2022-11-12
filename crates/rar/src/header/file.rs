@@ -1,14 +1,12 @@
 //! File Archive
 
 use bitflags::bitflags;
-use num_enum::{TryFromPrimitive, IntoPrimitive};
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use tracing::error;
 
-use crate::{BUFFER_SIZE, ArchiveReader, Result, extract_vint};
+use crate::{extract_vint, ArchiveReader, Result, BUFFER_SIZE};
 
 use super::{GeneralHeader, HeaderFlags};
-
-
 
 bitflags! {
     /// Flags specific for these header types:
@@ -43,8 +41,6 @@ bitflags! {
         const UNIX = 0b0000_0010;
     }
 }
-
-
 
 #[derive(Debug)]
 pub struct FileArchiveHeader {
@@ -130,8 +126,10 @@ impl FileArchiveHeader {
     ) -> Result<Self> {
         let file_flags = {
             let value = reader.next_vint(buffer).await?;
-            FileFlags::from_bits(value)
-            .ok_or(crate::Error::InvalidBitFlag { name: "File", flag: value })?
+            FileFlags::from_bits(value).ok_or(crate::Error::InvalidBitFlag {
+                name: "File",
+                flag: value,
+            })?
         };
 
         // TODO: If flag 0x0008 is set, unpacked size field is still present, but must be ignored and extraction must be performed until reaching the end of compression stream.
@@ -156,16 +154,27 @@ impl FileArchiveHeader {
 
         let host_os = {
             let value = reader.next_vint(buffer).await?;
-            OperatingSystem::from_bits(value)
-            .ok_or(crate::Error::InvalidBitFlag { name: "Operating System", flag: value })?
+            OperatingSystem::from_bits(value).ok_or(crate::Error::InvalidBitFlag {
+                name: "Operating System",
+                flag: value,
+            })?
         };
 
         let name_length = reader.next_vint(buffer).await?;
 
-        let name = String::from_utf8(reader.get_chunk_amount(buffer, name_length as usize).await?.to_vec())?;
+        let name = String::from_utf8(
+            reader
+                .get_chunk_amount(buffer, name_length as usize)
+                .await?
+                .to_vec(),
+        )?;
 
         let extra_area = if general_header.flags.contains(HeaderFlags::EXTRA_AREA) {
-            Some(parse_extra_area(&reader.get_chunk_amount(buffer, general_header.extra_area_size as usize).await?)?)
+            Some(parse_extra_area(
+                &reader
+                    .get_chunk_amount(buffer, general_header.extra_area_size as usize)
+                    .await?,
+            )?)
         } else {
             None
         };
@@ -200,17 +209,24 @@ impl FileArchiveHeader {
         })
     }
 
-    pub async fn read(&self, reader: &mut ArchiveReader<'_>, buffer: &mut [u8; BUFFER_SIZE]) -> Result<String> {
+    pub async fn read(
+        &self,
+        reader: &mut ArchiveReader<'_>,
+        buffer: &mut [u8; BUFFER_SIZE],
+    ) -> Result<String> {
         if let Some(pos) = self.data_position {
             reader.seek_to(pos).await?;
 
-            Ok(String::from_utf8(reader.get_chunk_amount(buffer, self.general_header.data_size as usize).await?)?)
+            Ok(String::from_utf8(
+                reader
+                    .get_chunk_amount(buffer, self.general_header.data_size as usize)
+                    .await?,
+            )?)
         } else {
             Ok(String::new())
         }
     }
 }
-
 
 // TODO: File Compression
 #[derive(Debug)]
@@ -236,9 +252,7 @@ impl TryFrom<u64> for FileCompressionInfo {
     type Error = crate::Error;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
-        Ok(Self {
-            value,
-        })
+        Ok(Self { value })
     }
 }
 
@@ -261,15 +275,13 @@ pub enum FileExtraRecordType {
     ServiceData,
 }
 
-
-
 #[derive(Debug)]
 pub enum FileExtraRecord {
     Time {
         modification: Option<u32>,
         creation: Option<u32>,
         last_access: Option<u32>,
-    }
+    },
 }
 
 fn parse_extra_area(extra_area: &[u8]) -> Result<Vec<FileExtraRecord>> {
@@ -293,11 +305,12 @@ fn parse_extra_area(extra_area: &[u8]) -> Result<Vec<FileExtraRecord>> {
             // 0 => {}
             // 1 => {}
             // 2 => {}
-
             FileExtraRecordType::Time => {
                 let (size_of, flag) = extract_vint(&extra_area[index..]);
-                let flags = FileTimeFlags::from_bits(flag)
-                    .ok_or(crate::Error::InvalidBitFlag { name: "File Time", flag })?;
+                let flags = FileTimeFlags::from_bits(flag).ok_or(crate::Error::InvalidBitFlag {
+                    name: "File Time",
+                    flag,
+                })?;
                 index += size_of;
 
                 // 1_667_895_851
@@ -312,7 +325,9 @@ fn parse_extra_area(extra_area: &[u8]) -> Result<Vec<FileExtraRecord>> {
                     } else {
                         let bytes = &extra_area[index..index + 8];
                         index += 8;
-                        modification = Some(((crate::bytes_to_u64(bytes) / 10_000_000) - 11_644_473_600) as u32);
+                        modification = Some(
+                            ((crate::bytes_to_u64(bytes) / 10_000_000) - 11_644_473_600) as u32,
+                        );
                     }
                 }
 
@@ -323,7 +338,9 @@ fn parse_extra_area(extra_area: &[u8]) -> Result<Vec<FileExtraRecord>> {
                     } else {
                         let bytes = &extra_area[index..index + 8];
                         index += 8;
-                        creation = Some(((crate::bytes_to_u64(bytes) / 10_000_000) - 11_644_473_600) as u32);
+                        creation = Some(
+                            ((crate::bytes_to_u64(bytes) / 10_000_000) - 11_644_473_600) as u32,
+                        );
                     }
                 }
 
@@ -334,23 +351,37 @@ fn parse_extra_area(extra_area: &[u8]) -> Result<Vec<FileExtraRecord>> {
                     } else {
                         let bytes = &extra_area[index..index + 8];
                         index += 8;
-                        last_access = Some(((crate::bytes_to_u64(bytes) / 10_000_000) - 11_644_473_600) as u32);
+                        last_access = Some(
+                            ((crate::bytes_to_u64(bytes) / 10_000_000) - 11_644_473_600) as u32,
+                        );
                     }
                 }
 
-                if flags.contains(FileTimeFlags::FORMAT_UNIX_TIME | FileTimeFlags::MODIFICATION | FileTimeFlags::UNIX_TIME_W_NANOSECOND) {
+                if flags.contains(
+                    FileTimeFlags::FORMAT_UNIX_TIME
+                        | FileTimeFlags::MODIFICATION
+                        | FileTimeFlags::UNIX_TIME_W_NANOSECOND,
+                ) {
                     let nano = crate::bytes_to_u32(&extra_area[index..index + 4]);
                     index += 4;
                     error!(?flags, nano, "Unimplemented Nanosecond Flag");
                 }
 
-                if flags.contains(FileTimeFlags::FORMAT_UNIX_TIME | FileTimeFlags::MODIFICATION | FileTimeFlags::UNIX_TIME_W_NANOSECOND) {
+                if flags.contains(
+                    FileTimeFlags::FORMAT_UNIX_TIME
+                        | FileTimeFlags::MODIFICATION
+                        | FileTimeFlags::UNIX_TIME_W_NANOSECOND,
+                ) {
                     let nano = crate::bytes_to_u32(&extra_area[index..index + 4]);
                     index += 4;
                     error!(?flags, nano, "Unimplemented Nanosecond Flag");
                 }
 
-                if flags.contains(FileTimeFlags::FORMAT_UNIX_TIME | FileTimeFlags::MODIFICATION | FileTimeFlags::UNIX_TIME_W_NANOSECOND) {
+                if flags.contains(
+                    FileTimeFlags::FORMAT_UNIX_TIME
+                        | FileTimeFlags::MODIFICATION
+                        | FileTimeFlags::UNIX_TIME_W_NANOSECOND,
+                ) {
                     let nano = crate::bytes_to_u32(&extra_area[index..index + 4]);
                     // index += 4;
                     error!(?flags, nano, "Unimplemented Nanosecond Flag");
@@ -367,7 +398,6 @@ fn parse_extra_area(extra_area: &[u8]) -> Result<Vec<FileExtraRecord>> {
             // 5 => {}
             // 6 => {}
             // 7 => {}
-
             _ => error!(?type_of, size, ?data, "Missing File Extra Area"),
         }
 
@@ -382,7 +412,6 @@ fn parse_extra_area(extra_area: &[u8]) -> Result<Vec<FileExtraRecord>> {
 //             Read the concrete archive block description for details.
 //             New record types can be added in the future, so unknown record types need to be skipped without interrupting an operation.
 // Data  ...   Record dependent data. May be missing if record consists only from size and type.
-
 
 bitflags! {
     /// 0x0001  Time is stored in Unix time_t format if this flags is set and in Windows FILETIME format otherwise

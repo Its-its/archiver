@@ -3,33 +3,29 @@
 // https://users.cs.jmu.edu/buchhofp/forensics/formats/pkzip.html
 
 #![feature(iter_array_chunks)]
-
 #![allow(dead_code)]
-
-#![deny(
-    clippy::unwrap_used,
-    clippy::expect_used
-)]
-
+#![deny(clippy::unwrap_used, clippy::expect_used)]
 
 use std::{io::SeekFrom, path::Path};
 
-use tokio::{fs::{self, File}, io::{AsyncSeekExt, AsyncReadExt}};
+use tokio::{
+    fs::{self, File},
+    io::{AsyncReadExt, AsyncSeekExt},
+};
 
 mod compression;
 mod error;
 mod header;
 
-pub(crate) use header::*;
-pub use error::*;
 pub use compression::CompressionType;
+pub use error::*;
+pub(crate) use header::*;
 
 /// Buffer Read Size
 const BUFFER_SIZE: usize = 1000;
 
 /// Signature takes up 4 bytes.
 const SIGNATURE_SIZE: usize = 4;
-
 
 pub struct Archive {
     file: File,
@@ -51,7 +47,9 @@ impl Archive {
         this.parse().await?;
 
         // TODO: Move out. Capacity reserve is used to tell us how many files we have for when we iterate through.
-        this.file_cache.files.reserve(this.end_header.total_record_count as usize);
+        this.file_cache
+            .files
+            .reserve(this.end_header.total_record_count as usize);
 
         Ok(this)
     }
@@ -83,7 +81,6 @@ impl Archive {
         self.file_cache.list_files(&mut reader).await
     }
 
-
     async fn parse(&mut self) -> Result<()> {
         let mut reader = ArchiveReader::init(&mut self.file).await?;
 
@@ -96,7 +93,6 @@ impl Archive {
         Ok(())
     }
 }
-
 
 pub struct ArchiveReader<'a> {
     // TODO: Utilize BufReader
@@ -158,7 +154,10 @@ impl<'a> ArchiveReader<'a> {
         self.index += COUNT;
     }
 
-    async fn get_next_chunk<'b, const COUNT: usize>(&mut self, buffer: &'b mut [u8; BUFFER_SIZE]) -> Result<&'b [u8]> {
+    async fn get_next_chunk<'b, const COUNT: usize>(
+        &mut self,
+        buffer: &'b mut [u8; BUFFER_SIZE],
+    ) -> Result<&'b [u8]> {
         if self.index + COUNT >= buffer.len() {
             self.seek_to_index(buffer).await?;
         }
@@ -170,7 +169,11 @@ impl<'a> ArchiveReader<'a> {
         Ok(v)
     }
 
-    async fn get_chunk_amount(&mut self, buffer: &mut [u8; BUFFER_SIZE], mut size: usize) -> Result<Vec<u8>> {
+    async fn get_chunk_amount(
+        &mut self,
+        buffer: &mut [u8; BUFFER_SIZE],
+        mut size: usize,
+    ) -> Result<Vec<u8>> {
         let mut filled = Vec::with_capacity(size);
 
         while size != 0 {
@@ -192,8 +195,13 @@ impl<'a> ArchiveReader<'a> {
         Ok(filled)
     }
 
-    fn find_next_signature<const SIG_SIZE: usize>(&self, buffer: &[u8], signature: [u8; SIG_SIZE]) -> Option<usize> {
-        buffer[self.index..].windows(SIG_SIZE)
+    fn find_next_signature<const SIG_SIZE: usize>(
+        &self,
+        buffer: &[u8],
+        signature: [u8; SIG_SIZE],
+    ) -> Option<usize> {
+        buffer[self.index..]
+            .windows(SIG_SIZE)
             .position(|v| v == signature)
             .map(|offset| self.index + offset)
     }

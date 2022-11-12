@@ -1,5 +1,5 @@
-use thiserror::Error as ThisError;
 use num_enum::TryFromPrimitiveError;
+use thiserror::Error as ThisError;
 
 pub type Result<R, E = Error> = std::result::Result<R, E>;
 
@@ -22,10 +22,7 @@ pub enum Error {
     NumEnumHeaderType4(#[from] TryFromPrimitiveError<crate::HeaderType4_0>),
 
     #[error("Invalid Bit Flag {name:?} => {flag:?}")]
-    InvalidBitFlag {
-        name: &'static str,
-        flag: u64,
-    },
+    InvalidBitFlag { name: &'static str, flag: u64 },
 
     #[error("Missing Main Header")]
     MissingMainHeader,

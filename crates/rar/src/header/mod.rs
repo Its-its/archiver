@@ -1,29 +1,26 @@
 use bitflags::bitflags;
-use num_enum::{TryFromPrimitive, IntoPrimitive};
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 
-use crate::{ArchiveReader, BUFFER_SIZE, Result};
+use crate::{ArchiveReader, Result, BUFFER_SIZE};
 
 mod archive_comment_service;
 mod archive_encryption;
-mod file;
 mod end_of_archive;
+mod file;
 mod main_archive;
 mod recovery;
 mod service;
 
 pub use archive_comment_service::*;
 pub use archive_encryption::*;
-pub use file::*;
 pub use end_of_archive::*;
+pub use file::*;
 pub use main_archive::*;
 pub use recovery::*;
 pub use service::*;
 
-
-
-
 /// Signature for 5.0 +
-pub(crate) const GENERAL_DIR_SIG_5_0: [u8; 8] = [0x52 , 0x61 , 0x72 , 0x21 , 0x1A , 0x07 , 0x01 , 0x00];
+pub(crate) const GENERAL_DIR_SIG_5_0: [u8; 8] = [0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00];
 
 // TODO: 0x52 0x45 0x7E 0x5E - Even older signature.
 
@@ -49,7 +46,6 @@ pub enum HeaderType {
     ArchiveEncryption,
     EndOfArchive,
 }
-
 
 bitflags! {
     /// 0x0001  Volume. Archive is a part of multivolume set.
@@ -129,15 +125,20 @@ pub struct GeneralHeader {
 }
 
 impl GeneralHeader {
-    pub async fn parse(reader: &mut ArchiveReader<'_>, buffer: &mut [u8; BUFFER_SIZE]) -> Result<Self> {
+    pub async fn parse(
+        reader: &mut ArchiveReader<'_>,
+        buffer: &mut [u8; BUFFER_SIZE],
+    ) -> Result<Self> {
         let crc32 = reader.next_u32(buffer).await?;
         let size = reader.next_vint(buffer).await?;
 
         let type_of = HeaderType::try_from(reader.next_vint(buffer).await? as u8)?;
         let flags = {
             let value = reader.next_vint(buffer).await?;
-            HeaderFlags::from_bits(value)
-            .ok_or(crate::Error::InvalidBitFlag { name: "Header", flag: value })?
+            HeaderFlags::from_bits(value).ok_or(crate::Error::InvalidBitFlag {
+                name: "Header",
+                flag: value,
+            })?
         };
 
         let extra_area_size = if flags.contains(HeaderFlags::EXTRA_AREA) {

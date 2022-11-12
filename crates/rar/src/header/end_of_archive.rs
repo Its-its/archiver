@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 
-use crate::{BUFFER_SIZE, ArchiveReader, Result};
+use crate::{ArchiveReader, Result, BUFFER_SIZE};
 
 use super::GeneralHeader;
 
@@ -19,8 +19,10 @@ impl EndOfArchiveHeader {
     ) -> Result<Self> {
         let archive_flags = {
             let value = reader.next_vint(buffer).await?;
-            EndOfArchiveFlags::from_bits(value)
-            .ok_or(crate::Error::InvalidBitFlag { name: "End Of Archive", flag: value })?
+            EndOfArchiveFlags::from_bits(value).ok_or(crate::Error::InvalidBitFlag {
+                name: "End Of Archive",
+                flag: value,
+            })?
         };
 
         Ok(Self {
@@ -29,7 +31,6 @@ impl EndOfArchiveHeader {
         })
     }
 }
-
 
 bitflags! {
     /// 0x0001  Archive is volume and it is not last volume in the set

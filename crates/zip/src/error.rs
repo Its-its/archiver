@@ -1,5 +1,5 @@
-use thiserror::Error as ThisError;
 use num_enum::TryFromPrimitiveError;
+use thiserror::Error as ThisError;
 
 pub type Result<R, E = Error> = std::result::Result<R, E>;
 

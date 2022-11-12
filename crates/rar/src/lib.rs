@@ -3,28 +3,24 @@
 // http://acritum.com/winrar/rar-format
 
 #![feature(iter_array_chunks)]
-
 #![allow(dead_code)]
-
-#![deny(
-    clippy::unwrap_used,
-    clippy::expect_used
-)]
-
+#![deny(clippy::unwrap_used, clippy::expect_used)]
 
 use std::{io::SeekFrom, path::Path};
 
-use tokio::{fs::{self, File}, io::{AsyncSeekExt, AsyncReadExt}};
+use tokio::{
+    fs::{self, File},
+    io::{AsyncReadExt, AsyncSeekExt},
+};
 use tracing::debug;
 
 mod error;
 mod header;
 mod header_4;
 
-pub(crate) use header::*;
-pub (crate) use header_4::*;
 pub use error::*;
-
+pub(crate) use header::*;
+pub(crate) use header_4::*;
 
 /// Buffer Read Size
 const BUFFER_SIZE: usize = 1000;
@@ -43,7 +39,7 @@ pub enum Archive {
 
     Four {
         file: File,
-    }
+    },
 }
 
 impl Archive {
@@ -80,7 +76,6 @@ impl Archive {
     //     self.files.list_files(&mut reader).await
     // }
 
-
     async fn parse(mut file: File) -> Result<Self> {
         let mut reader = ArchiveReader::init(&mut file, false).await?;
 
@@ -101,7 +96,8 @@ impl Archive {
                 // Set our current index to where the signature starts.
                 reader.index = at_index;
 
-                reader.is_v_5_0 = buffer[reader.index..reader.index + GENERAL_DIR_SIG_5_0.len()] == GENERAL_DIR_SIG_5_0;
+                reader.is_v_5_0 = buffer[reader.index..reader.index + GENERAL_DIR_SIG_5_0.len()]
+                    == GENERAL_DIR_SIG_5_0;
 
                 debug!("Signature Index: {at_index}, is 5.0 = {}", reader.is_v_5_0);
 
@@ -112,7 +108,10 @@ impl Archive {
 
                 // Double check.
                 if reader.is_v_5_0 {
-                    assert_eq!(&buffer[reader.index..reader.index + GENERAL_DIR_SIG_5_0.len()], &GENERAL_DIR_SIG_5_0);
+                    assert_eq!(
+                        &buffer[reader.index..reader.index + GENERAL_DIR_SIG_5_0.len()],
+                        &GENERAL_DIR_SIG_5_0
+                    );
                     reader.skip::<8>();
 
                     // General archive layout
@@ -142,8 +141,9 @@ impl Archive {
                                 let header = MainArchiveHeader::parse(
                                     general_header,
                                     &mut reader,
-                                    &mut buffer
-                                ).await?;
+                                    &mut buffer,
+                                )
+                                .await?;
 
                                 debug!("{header:#?}");
 
@@ -154,8 +154,9 @@ impl Archive {
                                 let header = FileArchiveHeader::parse(
                                     general_header,
                                     &mut reader,
-                                    &mut buffer
-                                ).await?;
+                                    &mut buffer,
+                                )
+                                .await?;
 
                                 debug!("{header:#?}");
 
@@ -166,8 +167,9 @@ impl Archive {
                                 let header = EndOfArchiveHeader::parse(
                                     general_header,
                                     &mut reader,
-                                    &mut buffer
-                                ).await?;
+                                    &mut buffer,
+                                )
+                                .await?;
 
                                 debug!("{header:#?}");
 
@@ -176,16 +178,20 @@ impl Archive {
                                 break;
                             }
 
-                            v => unimplemented!("{v:?}")
+                            v => unimplemented!("{v:?}"),
                         }
                     }
                 } else {
-                    assert_eq!(&buffer[reader.index..reader.index + GENERAL_DIR_SIG_4_0.len()], &GENERAL_DIR_SIG_4_0);
+                    assert_eq!(
+                        &buffer[reader.index..reader.index + GENERAL_DIR_SIG_4_0.len()],
+                        &GENERAL_DIR_SIG_4_0
+                    );
                     reader.skip::<7>();
 
                     // Iterate through headers.
                     loop {
-                        let general_header = GeneralHeader4::parse(&mut reader, &mut buffer).await?;
+                        let general_header =
+                            GeneralHeader4::parse(&mut reader, &mut buffer).await?;
 
                         debug!("{general_header:#?}");
 
@@ -233,7 +239,9 @@ impl Archive {
                                 // let high_unp_size = reader.next_u32(&mut buffer).await?;
                                 // debug!(high_unp_size);
 
-                                let file_name = String::from_utf8(reader.get_chunk_amount(&mut buffer, 23).await?)?;
+                                let file_name = String::from_utf8(
+                                    reader.get_chunk_amount(&mut buffer, 23).await?,
+                                )?;
                                 debug!(file_name);
 
                                 // TODO: present if (HEAD_FLAGS & 0x400) != 0
@@ -251,12 +259,14 @@ impl Archive {
                                 // else
                                 //    read or skip PACK_SIZE bytes
 
-                                let _value_packed = reader.get_chunk_amount(&mut buffer, pack_size as usize).await?;
+                                let _value_packed = reader
+                                    .get_chunk_amount(&mut buffer, pack_size as usize)
+                                    .await?;
                                 // TODO: It seems like RARs' compression format is confidential.
                                 // Look at https://github.com/aawc/unrar/blob/d84d61312db5dd83ed1da9fe3e45cb233a56630c/unpack.cpp#L149
                             }
 
-                            v => unimplemented!("{v:?}")
+                            v => unimplemented!("{v:?}"),
                         }
                     }
                 }
@@ -275,7 +285,10 @@ impl Archive {
 
             // We negate the signature size to ensure we didn't get a partial previously.
             // We remove 1 from size to prevent (end of buffer) duplicates.
-            reader.file.seek(SeekFrom::Current(1 - SIGNATURE_SIZE as i64)).await?;
+            reader
+                .file
+                .seek(SeekFrom::Current(1 - SIGNATURE_SIZE as i64))
+                .await?;
         }
 
         if reader.is_v_5_0 {
@@ -286,13 +299,10 @@ impl Archive {
                 files,
             })
         } else {
-            Ok(Self::Four {
-                file,
-            })
+            Ok(Self::Four { file })
         }
     }
 }
-
 
 pub struct ArchiveReader<'a> {
     // TODO: Utilize BufReader
@@ -357,7 +367,10 @@ impl<'a> ArchiveReader<'a> {
         self.index += COUNT;
     }
 
-    async fn get_next_chunk<'b, const COUNT: usize>(&mut self, buffer: &'b mut [u8; BUFFER_SIZE]) -> Result<&'b [u8]> {
+    async fn get_next_chunk<'b, const COUNT: usize>(
+        &mut self,
+        buffer: &'b mut [u8; BUFFER_SIZE],
+    ) -> Result<&'b [u8]> {
         if self.index + COUNT >= buffer.len() {
             self.seek_to_index(buffer).await?;
         }
@@ -369,7 +382,11 @@ impl<'a> ArchiveReader<'a> {
         Ok(v)
     }
 
-    async fn get_chunk_amount(&mut self, buffer: &mut [u8; BUFFER_SIZE], mut size: usize) -> Result<Vec<u8>> {
+    async fn get_chunk_amount(
+        &mut self,
+        buffer: &mut [u8; BUFFER_SIZE],
+        mut size: usize,
+    ) -> Result<Vec<u8>> {
         let mut filled = Vec::with_capacity(size);
 
         while size != 0 {
@@ -391,7 +408,8 @@ impl<'a> ArchiveReader<'a> {
     }
 
     fn find_signature_pos(&self, buffer: &[u8]) -> Option<usize> {
-        buffer[self.index..].windows(GENERAL_DIR_SIG_4_0.len())
+        buffer[self.index..]
+            .windows(GENERAL_DIR_SIG_4_0.len())
             .zip(buffer[self.index..].windows(GENERAL_DIR_SIG_5_0.len()))
             .position(|v| v.0 == GENERAL_DIR_SIG_4_0 || v.1 == GENERAL_DIR_SIG_5_0)
             .map(|offset| self.index + offset)
@@ -414,7 +432,6 @@ impl<'a> ArchiveReader<'a> {
     async fn next_u64(&mut self, buffer: &mut [u8; BUFFER_SIZE]) -> Result<u64> {
         Ok(bytes_to_u64(self.get_next_chunk::<8>(buffer).await?))
     }
-
 
     /// Can include one or more bytes, where lower 7 bits of every byte contain integer data and highest bit in every byte is the continuation flag.
     ///
@@ -446,33 +463,26 @@ impl<'a> ArchiveReader<'a> {
 pub(crate) fn bytes_to_u64(bytes: &[u8]) -> u64 {
     assert!(bytes.len() == 8);
 
-    (bytes[7] as u64) << 56 |
-    (bytes[6] as u64) << 48 |
-    (bytes[5] as u64) << 40 |
-    (bytes[4] as u64) << 32 |
-    (bytes[3] as u64) << 24 |
-    (bytes[2] as u64) << 16 |
-    (bytes[1] as u64) << 8 |
-    bytes[0] as u64
-
+    (bytes[7] as u64) << 56
+        | (bytes[6] as u64) << 48
+        | (bytes[5] as u64) << 40
+        | (bytes[4] as u64) << 32
+        | (bytes[3] as u64) << 24
+        | (bytes[2] as u64) << 16
+        | (bytes[1] as u64) << 8
+        | bytes[0] as u64
 }
 
 pub(crate) fn bytes_to_u32(bytes: &[u8]) -> u32 {
     assert!(bytes.len() == 4);
 
-    (bytes[3] as u32) << 24 |
-    (bytes[2] as u32) << 16 |
-    (bytes[1] as u32) << 8 |
-    bytes[0] as u32
-
+    (bytes[3] as u32) << 24 | (bytes[2] as u32) << 16 | (bytes[1] as u32) << 8 | bytes[0] as u32
 }
 
 pub(crate) fn bytes_to_u16(bytes: &[u8]) -> u16 {
     assert!(bytes.len() == 2);
 
-    (bytes[1] as u16) << 8 |
-    bytes[0] as u16
-
+    (bytes[1] as u16) << 8 | bytes[0] as u16
 }
 
 fn extract_vint(buffer: &[u8]) -> (usize, u64) {
@@ -506,18 +516,9 @@ mod tests {
 
     #[test]
     fn test_collect_vint() {
-        assert_eq!(
-            extract_vint(&[0x01, 0xFF, 0x00]),
-            (1, 0x01)
-        );
-        assert_eq!(
-            extract_vint(&[0xFF, 0x01, 0x00]),
-            (2, 0xFF)
-        );
-        assert_eq!(
-            extract_vint(&[0xFF, 0xFF, 0x00]),
-            (3, 0x3FFF)
-        );
+        assert_eq!(extract_vint(&[0x01, 0xFF, 0x00]), (1, 0x01));
+        assert_eq!(extract_vint(&[0xFF, 0x01, 0x00]), (2, 0xFF));
+        assert_eq!(extract_vint(&[0xFF, 0xFF, 0x00]), (3, 0x3FFF));
     }
 
     #[test]

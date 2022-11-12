@@ -2,15 +2,12 @@
 
 use std::io::SeekFrom;
 
-use tokio::io::{AsyncSeekExt, AsyncReadExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
-use crate::{BUFFER_SIZE, SIGNATURE_SIZE, ArchiveReader, Result, Error};
-
+use crate::{ArchiveReader, Error, Result, BUFFER_SIZE, SIGNATURE_SIZE};
 
 pub(crate) const END_CENTRAL_DIR_SIG: [u8; 4] = [0x50, 0x4B, 0x05, 0x06];
 pub(crate) const END_CENTRAL_DIR_SIZE_KNOWN: usize = 22;
-
-
 
 /// Used to share the relevant Zip Info.
 #[derive(Debug, Clone)]
@@ -24,8 +21,6 @@ pub struct ArchiveInfo {
     /// Archive Comment, if there is one.
     pub comment: String,
 }
-
-
 
 /// Is at the end of every Zip file
 #[derive(Debug, Default)]
@@ -49,8 +44,14 @@ pub(crate) struct EndCentralDirHeader {
 }
 
 impl EndCentralDirHeader {
-    pub async fn parse(reader: &mut ArchiveReader<'_>, buffer: &mut [u8; BUFFER_SIZE]) -> Result<Self> {
-        assert_eq!(&buffer[reader.index..reader.index + 4], &END_CENTRAL_DIR_SIG);
+    pub async fn parse(
+        reader: &mut ArchiveReader<'_>,
+        buffer: &mut [u8; BUFFER_SIZE],
+    ) -> Result<Self> {
+        assert_eq!(
+            &buffer[reader.index..reader.index + 4],
+            &END_CENTRAL_DIR_SIG
+        );
 
         reader.skip::<4>();
 
@@ -65,7 +66,11 @@ impl EndCentralDirHeader {
             comment: String::new(),
         };
 
-        header.comment = String::from_utf8(reader.get_chunk_amount(buffer, header.comment_len as usize).await?)?;
+        header.comment = String::from_utf8(
+            reader
+                .get_chunk_amount(buffer, header.comment_len as usize)
+                .await?,
+        )?;
 
         Ok(header)
     }
@@ -87,7 +92,10 @@ impl EndCentralDirHeader {
 
                 // trace!("Found End Header @ {} {} {:x?}", archive.file.stream_position().unwrap() as usize + archive.index, archive.index, &buffer[archive.index..archive.index + 4]);
 
-                assert_eq!(&buffer[reader.index..reader.index + 4], &END_CENTRAL_DIR_SIG);
+                assert_eq!(
+                    &buffer[reader.index..reader.index + 4],
+                    &END_CENTRAL_DIR_SIG
+                );
 
                 // TODO: Remove.
                 if reader.index + END_CENTRAL_DIR_SIZE_KNOWN >= buffer.len() {
@@ -107,7 +115,10 @@ impl EndCentralDirHeader {
             }
 
             // We negate the signature size to ensure we didn't get a partial previously. We remove 1 from size to prevent (end of buffer) duplicates.
-            reader.file.seek(SeekFrom::Current(1 - SIGNATURE_SIZE as i64)).await?;
+            reader
+                .file
+                .seek(SeekFrom::Current(1 - SIGNATURE_SIZE as i64))
+                .await?;
         }
 
         Err(Error::MissingEndHeader)
