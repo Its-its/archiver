@@ -1,4 +1,4 @@
-use std::io::SeekFrom;
+use std::{io::SeekFrom, fmt};
 
 use tokio::io::{AsyncSeekExt, AsyncReadExt};
 
@@ -18,9 +18,7 @@ pub struct CentralDirHeader {
     /// Version made by
     pub by_version: Version,
     /// Version needed to extract (minimum)
-    // TODO: Early 7.x (pre-7.2) versions of PKZIP incorrectly set the version needed to extract for BZIP2 compression to be 50 when it SHOULD have been 46.
-    // TODO: When using ZIP64 extensions, the corresponding value in the zip64 end of central directory record MUST also be set. This field SHOULD be set appropriately to indicate whether Version 1 or Version 2 format is in use.
-    pub min_version: u16,
+    pub min_version: VersionNeeded,
     /// General purpose bit flag
     pub gp_flag: u16,
     /// Compression method
@@ -67,7 +65,7 @@ impl CentralDirHeader {
 
         let mut header = Self {
             by_version: chunk_to_version(reader.get_next_chunk::<2>(buffer).await?),
-            min_version: reader.next_u16(buffer).await?,
+            min_version: VersionNeeded(reader.next_u16(buffer).await?),
             gp_flag: reader.next_u16(buffer).await?,
             compression: CompressionType::try_from(reader.next_u16(buffer).await?)?,
             file_last_mod_time: reader.next_u16(buffer).await?,
@@ -199,6 +197,7 @@ pub struct Version {
 
 impl Version {
     pub fn from_bytes(upper: u8, lower: u8) -> Self {
+        // TODO: Validate.
         Self {
             compatibility: upper,
             major: lower / 10,
@@ -211,35 +210,40 @@ fn chunk_to_version(buffer: &[u8]) -> Version {
     Version::from_bytes(buffer[1], buffer[0])
 }
 
-// 4.4.2 version made by (2 bytes)
-//     4.4.2.1 The upper byte indicates the compatibility of the file
-//     attribute information.  If the external file attributes
-//     are compatible with MS-DOS and can be read by PKZIP for
-//     DOS version 2.04g then this value will be zero.  If these
-//     attributes are not compatible, then this value will
-//     identify the host system on which the attributes are
-//     compatible.  Software can use this information to determine
-//     the line record format for text files etc.
-//
-//     4.4.2.2 The current mappings are:
-//         0 - MS-DOS and OS/2 (FAT / VFAT / FAT32 file systems)
-//         1 - Amiga                     2 - OpenVMS
-//         3 - UNIX                      4 - VM/CMS
-//         5 - Atari ST                  6 - OS/2 H.P.F.S.
-//         7 - Macintosh                 8 - Z-System
-//         9 - CP/M                     10 - Windows NTFS
-//        11 - MVS (OS/390 - Z/OS)      12 - VSE
-//        13 - Acorn Risc               14 - VFAT
-//        15 - alternate MVS            16 - BeOS
-//        17 - Tandem                   18 - OS/400
-//        19 - OS X (Darwin)            20 thru 255 - unused
-//
-//     4.4.2.3 The lower byte indicates the ZIP specification version
-//     (the version of this document) supported by the software
-//     used to encode the file.  The value/10 indicates the major
-//     version number, and the value mod 10 is the minor version
-//     number.
 
+#[derive(Debug, Clone, Copy)]
+pub struct VersionNeeded(u16);
+
+impl VersionNeeded {
+    pub fn is_file(&self) -> bool {
+        !self.is_folder()
+    }
+
+    pub fn is_folder(&self) -> bool {
+        // TODO: Probably more tests
+        self.0 == 20
+    }
+}
+
+impl fmt::Display for VersionNeeded {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+// TODO: Early 7.x (pre-7.2) versions of PKZIP incorrectly set the version needed to extract for BZIP2 compression to be 50 when it SHOULD have been 46.
+// TODO: When using ZIP64 extensions, the corresponding value in the zip64 end of central directory record MUST also be set. This field SHOULD be set appropriately to indicate whether Version 1 or Version 2 format is in use.
+
+// 4.4.3 version needed to extract (2 bytes)
+//     4.4.3.1 The minimum supported ZIP specification version needed
+//     to extract the file, mapped as above.  This value is based on
+//     the specific format features a ZIP program MUST support to
+//     be able to extract the file.  If multiple features are
+//     applied to a file, the minimum version MUST be set to the
+//     feature having the highest value. New features or feature
+//     changes affecting the published format specification will be
+//     implemented using higher version numbers than the last
+//     published value to avoid conflict.
 
 // 4.4.3.2 Current minimum feature versions are as defined below:
 //     1.0 - Default value
@@ -265,6 +269,30 @@ fn chunk_to_version(buffer: &[u8]) -> Version {
 //     6.3 - File is compressed using PPMd+
 //     6.3 - File is encrypted using Blowfish
 //     6.3 - File is encrypted using Twofish
+
+// 4.4.3.3 Notes on version needed to extract
+//     * Early 7.x (pre-7.2) versions of PKZIP incorrectly set the
+//     version needed to extract for BZIP2 compression to be 50
+//     when it SHOULD have been 46.
+//
+//     ** Refer to the section on Strong Encryption Specification
+//     for additional information regarding RC2 corrections.
+//
+//     *** Certificate encryption using non-OAEP key wrapping is the
+//     intended mode of operation for all versions beginning with 6.1.
+//     Support for OAEP key wrapping MUST only be used for
+//     backward compatibility when sending ZIP files to be opened by
+//     versions of PKZIP older than 6.1 (5.0 or 6.0).
+//
+//     + Files compressed using PPMd MUST set the version
+//     needed to extract field to 6.3, however, not all ZIP
+//     programs enforce this and MAY be unable to decompress
+//     data files compressed using PPMd if this value is set.
+//
+//     When using ZIP64 extensions, the corresponding value in the
+//     zip64 end of central directory record MUST also be set.
+//     This field SHOULD be set appropriately to indicate whether
+//     Version 1 or Version 2 format is in use.
 
 // 4.4.4 general purpose bit flag: (2 bytes)
 //     Bit 0: If set, indicates that the file is encrypted.

@@ -20,6 +20,7 @@ async fn main() -> Result<()> {
 
     for file in files {
         debug!("{}", file.file_name);
+        debug!("   Is Folder: {}", file.min_version.is_folder());
         debug!("   GP FLAG: {:#X}", file.gp_flag);
         debug!("   compression: {:?}", file.compression);
         debug!("   min_version: {}", file.min_version);

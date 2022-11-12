@@ -30,9 +30,9 @@ pub struct LocalFileHeader {
     // Extra field length (m)
     extra_field_length: u16,
     // File name
-    pub file_name: String,
+    file_name: String,
     // Extra field
-    pub extra_field: Vec<(u16, u16)>,
+    extra_field: Vec<(u16, u16)>,
 }
 
 impl LocalFileHeader {
